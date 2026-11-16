@@ -1,0 +1,2 @@
+plum: {'id': '18587', 'x': '166', 'y': '81', 'w': '1180', 'h': '760', 'onscreen': 'yes', 'display': '1', 'scale': '2', 'refresh': '120'}
+ghostty: {'id': '18597', 'x': '308', 'y': '33', 'w': '984', 'h': '730', 'onscreen': 'yes', 'display': '1', 'scale': '2', 'refresh': '120'}
