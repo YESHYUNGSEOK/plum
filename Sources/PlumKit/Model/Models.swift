@@ -50,6 +50,8 @@ public struct AppState: Codable, Equatable {
     public var projects: [Project] = []
     public var workspaces: [Workspace] = []
     public var settings = AppSettings()
+    /// The workspace selected when the app last ran.
+    public var lastSelection: UUID?
 
     public init() {}
 
@@ -59,6 +61,7 @@ public struct AppState: Codable, Equatable {
         projects = try container.decodeIfPresent([Project].self, forKey: .projects) ?? []
         workspaces = try container.decodeIfPresent([Workspace].self, forKey: .workspaces) ?? []
         settings = try container.decodeIfPresent(AppSettings.self, forKey: .settings) ?? AppSettings()
+        lastSelection = try container.decodeIfPresent(UUID.self, forKey: .lastSelection)
     }
 }
 

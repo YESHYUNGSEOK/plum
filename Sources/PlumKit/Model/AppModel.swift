@@ -1,9 +1,11 @@
 import AppKit
-import Combine
 import Foundation
+import Observation
 
 /// One terminal tab inside a workspace.
 public final class TerminalTab: Identifiable {
+    @MainActor func status(in model: AppModel) -> AgentStatus { model.statuses[id] ?? .idle }
+
     public let id: UUID
     public let workspaceID: UUID
     public let session: TerminalSession
@@ -18,32 +20,61 @@ public final class TerminalTab: Identifiable {
     }
 }
 
+/// A workspace whose worktree is still being made. It shows in the sidebar,
+/// with its steps in the panel, until it becomes a real workspace.
+public struct PendingWorkspace: Identifiable {
+    public struct Step {
+        /// Nil for the setup command, which the first tab runs afterwards.
+        public let kind: WorkspaceService.CreateStep?
+        public let detail: String
+    }
+
+    public let id = UUID()
+    public let projectID: UUID
+    public let name: String
+    public let steps: [Step]
+    /// The step running now; nil until the first one starts.
+    public var current: WorkspaceService.CreateStep?
+
+    /// Index of the running step: those before it are done.
+    public var currentIndex: Int { current.flatMap { step in steps.firstIndex { $0.kind == step } } ?? 0 }
+}
+
 /// Everything the windows show: projects, workspaces, tabs and agent states.
+/// Observed per property: a view redraws only when something it read changes,
+/// so a tab title that ticks ten times a second redraws the tab bar alone.
 @MainActor
-public final class AppModel: ObservableObject {
-    @Published public private(set) var state: AppState
+@Observable
+public final class AppModel {
+    public private(set) var state: AppState
     /// The selected workspace. A project's main checkout uses the project's id.
-    @Published public private(set) var selection: UUID?
-    @Published public private(set) var tabs: [UUID: [TerminalTab]] = [:]
-    @Published public private(set) var activeTabs: [UUID: UUID] = [:]
-    @Published public private(set) var statuses: [UUID: AgentStatus] = [:]
-    @Published public private(set) var titles: [UUID: String] = [:]
+    public private(set) var selection: UUID?
+    public private(set) var tabs: [UUID: [TerminalTab]] = [:]
+    public private(set) var activeTabs: [UUID: UUID] = [:]
+    public private(set) var statuses: [UUID: AgentStatus] = [:]
+    public private(set) var titles: [UUID: String] = [:]
     /// Workspaces whose worktree is being created or removed right now.
-    @Published public private(set) var busy: Set<UUID> = []
-    @Published public var errorMessage: String?
-    @Published public var sheet: AppSheet?
+    public private(set) var busy: Set<UUID> = []
+    public private(set) var pending: [PendingWorkspace] = []
+    public var errorMessage: String?
+    public var sheet: AppSheet?
+    public var sidebarCollapsed = false
+    /// The sidebar has the keyboard: arrows move between workspaces.
+    public var sidebarHasKeyboard = false
 
     /// Called when a tab needs the user and they aren't looking at it.
-    public var notify: ((_ title: String, _ body: String, _ tab: UUID) -> Void)?
+    @ObservationIgnored public var notify: ((_ title: String, _ body: String, _ tab: UUID) -> Void)?
 
     public let store: Store
-    private var server: StatusServer?
-    private var hookSettingsPath = ""
-    var debugResult = ""
-    var debugWindowNumber: (() -> Int)?
-    var debugTerminalView: (() -> TerminalView?)?
-    var debugNotificationStatus: (() -> String)?
-    var debugWindow: (() -> NSWindow?)?
+    @ObservationIgnored private var server: StatusServer?
+    @ObservationIgnored private var hookSettingsPath = ""
+    @ObservationIgnored var debugResult = ""
+    @ObservationIgnored var debugWindowNumber: (() -> Int)?
+    @ObservationIgnored var debugTerminalView: (() -> TerminalView?)?
+    @ObservationIgnored var debugNotificationStatus: (() -> String)?
+    @ObservationIgnored var debugWindow: (() -> NSWindow?)?
+    @ObservationIgnored var debugToggleSidebar: (() -> Void)?
+    @ObservationIgnored var debugTraceDialogClose: ((@escaping (String) -> Void) -> Void)?
 
     public init(store: Store = Store()) {
         self.store = store
@@ -68,13 +99,14 @@ public final class AppModel: ObservableObject {
             try server.start()
             self.server = server
         } catch {
-            errorMessage = "에이전트 상태 수신을 시작하지 못했습니다: \(error.localizedDescription)"
+            errorMessage = String(localized: "에이전트 상태 수신을 시작하지 못했습니다: \(error.localizedDescription)")
         }
-        if let first = state.projects.first { select(first.id) }
+        let last = state.lastSelection.flatMap(workspace)
+        if let start = last.map(\.id) ?? state.projects.first?.id { select(start) }
     }
 
     private func save() {
-        do { try store.save(state) } catch { errorMessage = "상태를 저장하지 못했습니다: \(error.localizedDescription)" }
+        do { try store.save(state) } catch { errorMessage = String(localized: "상태를 저장하지 못했습니다: \(error.localizedDescription)") }
     }
 
     // MARK: Lookup
@@ -122,7 +154,13 @@ public final class AppModel: ObservableObject {
     // MARK: Selection and tabs
 
     public func select(_ id: UUID?) {
+        let before = place
+        defer { record(before) }
         selection = id
+        if let id, workspace(id) != nil, state.lastSelection != id {
+            state.lastSelection = id
+            save()
+        }
         guard let id, let workspace = workspace(id), !workspace.isArchived, folderExists(workspace) else { return }
         if (tabs[id] ?? []).isEmpty { openTab(in: id) }
         tabBecameVisible()
@@ -144,20 +182,24 @@ public final class AppModel: ObservableObject {
         do {
             try session.start(shell: Self.loginShell, cwd: workspace.path, environment: environment(for: tab, workspace: workspace))
         } catch {
-            errorMessage = "셸을 시작하지 못했습니다: \(error.localizedDescription)"
+            errorMessage = String(localized: "셸을 시작하지 못했습니다: \(error.localizedDescription)")
             return nil
         }
         if let command, !command.isEmpty { session.writeWhenReady(command + "\n") }
 
         tabs[workspaceID, default: []].append(tab)
+        if let current = activeTabs[workspaceID] { recentTab[workspaceID] = current }
         activeTabs[workspaceID] = id
         return tab
     }
 
     public func activateTab(_ id: UUID) {
         guard let tab = tab(id) else { return }
+        let before = place
+        if let current = activeTabs[tab.workspaceID], current != id { recentTab[tab.workspaceID] = current }
         activeTabs[tab.workspaceID] = id
         tabBecameVisible()
+        record(before)
     }
 
     /// Moves to the next (+1) or previous (-1) tab of the selected workspace.
@@ -190,6 +232,9 @@ public final class AppModel: ObservableObject {
         tabs[workspaceID] = nil
         activeTabs[workspaceID] = nil
     }
+
+    /// "zsh", "fish"…: what a tab is called while only the shell runs in it.
+    static var shellName: String { (loginShell as NSString).lastPathComponent }
 
     private static var loginShell: String {
         if let entry = getpwuid(getuid()), let shell = entry.pointee.pw_shell {
@@ -257,7 +302,7 @@ public final class AppModel: ObservableObject {
 
         if !visible, effective == .waiting || effective == .done, let workspace = workspace(tab.workspaceID) {
             let project = project(workspace.projectID)?.name ?? ""
-            let fallback = effective == .waiting ? "입력을 기다리고 있습니다." : "작업을 마쳤습니다."
+            let fallback = effective == .waiting ? String(localized: "입력을 기다리고 있습니다.") : String(localized: "작업을 마쳤습니다.")
             notify?("\(project) · \(workspace.name)", message.isEmpty ? fallback : message, id)
         }
     }
@@ -273,18 +318,172 @@ public final class AppModel: ObservableObject {
         if statuses[id] == .waiting || statuses[id] == .done { statuses[id] = nil }
     }
 
+    // MARK: Moving around
+
+    /// Where the user is: a workspace and the tab showing in it.
+    public struct Place: Equatable {
+        public let workspace: UUID
+        public let tab: UUID?
+    }
+
+    @ObservationIgnored private var past: [Place] = []
+    @ObservationIgnored private var future: [Place] = []
+    /// Set while going back, forward or anywhere in several steps, so the
+    /// steps don't land in the history themselves.
+    @ObservationIgnored private var replaying = false
+    /// Per workspace, the tab shown before the current one.
+    @ObservationIgnored private var recentTab: [UUID: UUID] = [:]
+
+    private var place: Place? { selection.map { Place(workspace: $0, tab: activeTabs[$0]) } }
+
+    private func record(_ before: Place?) {
+        guard !replaying, let before, before != place else { return }
+        past.append(before)
+        if past.count > 100 { past.removeFirst() }
+        future.removeAll()
+    }
+
+    /// Runs several steps as one move: one history entry, from where it began.
+    private func navigate(_ steps: () -> Void) {
+        let before = place
+        let outer = replaying
+        replaying = true
+        steps()
+        replaying = outer
+        record(before)
+    }
+
+    private func canVisit(_ place: Place) -> Bool {
+        guard let workspace = workspace(place.workspace) else { return false }
+        return !workspace.isArchived
+    }
+
+    private func visit(_ place: Place) {
+        let outer = replaying
+        replaying = true
+        defer { replaying = outer }
+        select(place.workspace)
+        if let tab = place.tab, tabs[place.workspace]?.contains(where: { $0.id == tab }) == true { activateTab(tab) }
+    }
+
+    /// Back and forward through the places visited, like a browser.
+    public func goBack() { step(from: &past, to: &future) }
+    public func goForward() { step(from: &future, to: &past) }
+
+    private func step(from source: inout [Place], to destination: inout [Place]) {
+        guard let current = place else { return }
+        while let target = source.popLast() {
+            guard canVisit(target), target != current else { continue }
+            destination.append(current)
+            visit(target)
+            return
+        }
+    }
+
+    /// The place before this one, and pressed again, back: two places to alternate between.
+    public func goToLastPlace() {
+        guard let current = place else { return }
+        while let target = past.popLast() {
+            guard canVisit(target), target.workspace != current.workspace || target.tab != current.tab else { continue }
+            past.append(current)
+            visit(target)
+            return
+        }
+    }
+
+    /// Workspaces visited before the current one, most recent first.
+    public var recentWorkspaces: [UUID] {
+        var seen: Set<UUID> = selection.map { [$0] } ?? []
+        return past.reversed().map(\.workspace).filter { canVisit(Place(workspace: $0, tab: nil)) && seen.insert($0).inserted }
+    }
+
+    /// Workspaces in sidebar order: each project's main checkout, then its workspaces.
+    public var workspaceOrder: [UUID] {
+        state.projects.flatMap { workspaces(in: $0) }.map(\.id)
+    }
+
+    /// The next (+1) or previous (-1) workspace in sidebar order, wrapping.
+    public func selectWorkspace(offset: Int) {
+        let order = workspaceOrder
+        guard !order.isEmpty else { return }
+        let index = selection.flatMap { order.firstIndex(of: $0) } ?? (offset > 0 ? -1 : 0)
+        select(order[(index + offset + order.count) % order.count])
+    }
+
+    /// The workspace at a position in the sidebar; nil index means the last one.
+    public func selectWorkspace(at index: Int?) {
+        let order = workspaceOrder
+        guard let target = index.map({ order.indices.contains($0) ? order[$0] : nil }) ?? order.last else { return }
+        select(target)
+    }
+
+    /// The next workspace that waits for an answer or has finished, waiting
+    /// ones first; pressed again, the one after. Shows the tab that asked.
+    public func jumpToAttention() {
+        let order = workspaceOrder
+        let wanting = order.filter { status(of: $0) == .waiting } + order.filter { status(of: $0) == .done }
+        guard !wanting.isEmpty else { return }
+        let target = selection.flatMap { wanting.firstIndex(of: $0) }.map { wanting[($0 + 1) % wanting.count] } ?? wanting[0]
+        navigate {
+            select(target)
+            let asking = (tabs[target] ?? []).max { ($0.status(in: self)).urgency < ($1.status(in: self)).urgency }
+            if let asking, asking.status(in: self) != .idle { activateTab(asking.id) }
+        }
+    }
+
+    /// The tab shown before this one in the same workspace; again, back.
+    public func activateRecentTab() {
+        guard let selection, let previous = recentTab[selection],
+              tabs[selection]?.contains(where: { $0.id == previous }) == true else { return }
+        activateTab(previous)
+    }
+
+    /// The last tab of the selected workspace.
+    public func activateLastTab() {
+        guard let selection, let last = tabs[selection]?.last else { return }
+        activateTab(last.id)
+    }
+
+    /// Moves a workspace one place up (-1) or down (+1) among its project's
+    /// workspaces. The main checkout stays first.
+    public func moveWorkspace(_ id: UUID, by offset: Int) {
+        guard let moving = state.workspaces.first(where: { $0.id == id }), !moving.isArchived else { return }
+        let siblings = state.workspaces.indices.filter {
+            state.workspaces[$0].projectID == moving.projectID && !state.workspaces[$0].isArchived
+        }
+        guard let position = siblings.firstIndex(where: { state.workspaces[$0].id == id }),
+              siblings.indices.contains(position + offset) else { return }
+        state.workspaces.swapAt(siblings[position], siblings[position + offset])
+        save()
+    }
+
+    /// Moves a tab one place left (-1) or right (+1).
+    public func moveTab(_ id: UUID, by offset: Int) {
+        guard let tab = tab(id), var list = tabs[tab.workspaceID], let index = list.firstIndex(where: { $0.id == id }),
+              list.indices.contains(index + offset) else { return }
+        list.swapAt(index, index + offset)
+        tabs[tab.workspaceID] = list
+    }
+
+    /// Programs running in the foreground of a workspace's tabs, by name.
+    public func runningPrograms(in workspaceID: UUID) -> [String] {
+        (tabs[workspaceID] ?? []).compactMap { $0.session.foregroundProgram() }
+    }
+
     /// Brings a tab to the front, e.g. from a clicked notification.
     public func reveal(tab id: UUID) {
         guard let tab = tab(id) else { return }
-        selection = tab.workspaceID
-        activateTab(id)
+        navigate {
+            selection = tab.workspaceID
+            activateTab(id)
+        }
     }
 
     // MARK: Projects and settings
 
     public func addProject(at path: String) {
         guard let root = Git.repositoryRoot(of: path) else {
-            errorMessage = "git 저장소가 아닙니다: \(path)"
+            errorMessage = String(localized: "git 저장소가 아닙니다: \(path)")
             return
         }
         if let existing = state.projects.first(where: { WorkspaceService.samePath($0.path, root) }) {
@@ -338,22 +537,68 @@ public final class AppModel: ObservableObject {
 
     private func report(_ created: WorkspaceService.Created) {
         if !created.rejectedPatterns.isEmpty {
-            errorMessage = "저장소 밖을 가리키는 복사 패턴은 건너뛰었습니다: \(created.rejectedPatterns.joined(separator: ", "))"
+            errorMessage = String(localized: "저장소 밖을 가리키는 복사 패턴은 건너뛰었습니다: \(created.rejectedPatterns.joined(separator: ", "))")
         }
+    }
+
+    /// Why a workspace with these settings can't be made, or nil if it can.
+    /// Runs `create`'s own checks, so the form can stay open to fix them.
+    public func problemCreatingWorkspace(projectID: UUID, name: String, branch: String, choice: WorkspaceService.BranchChoice) async -> String? {
+        guard let project = project(projectID) else { return String(localized: "프로젝트가 없습니다.") }
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        if pending.contains(where: { $0.projectID == projectID && $0.name == trimmed }) {
+            return String(localized: "같은 이름의 워크스페이스를 만드는 중입니다: \(trimmed)")
+        }
+        let root = state.settings.workspaceRoot
+        let existing = state.workspaces
+        return await Task.detached {
+            do {
+                _ = try WorkspaceService.validate(project: project, name: name, branch: branch, choice: choice, root: root, existing: existing)
+                return nil
+            } catch {
+                return error.localizedDescription
+            }
+        }.value
     }
 
     public func createWorkspace(projectID: UUID, name: String, branch: String, choice: WorkspaceService.BranchChoice) async throws {
         guard let project = project(projectID) else { return }
         let root = state.settings.workspaceRoot
         let existing = state.workspaces
-        let created = try await Task.detached {
-            try WorkspaceService.create(project: project, name: name, branch: branch, choice: choice, root: root, existing: existing)
-        }.value
+        let setup = setupCommand(for: project)
+        var steps: [PendingWorkspace.Step] = []
+        if case .new = choice { steps.append(.init(kind: .fetch, detail: "git fetch")) }
+        steps.append(.init(kind: .worktree, detail: branch))
+        if !project.copyPatterns.isEmpty { steps.append(.init(kind: .copy, detail: project.copyPatterns.joined(separator: " "))) }
+        if !setup.isEmpty { steps.append(.init(kind: nil, detail: setup)) }
+        let placeholder = PendingWorkspace(projectID: projectID, name: name.trimmingCharacters(in: .whitespaces), steps: steps)
+        let id = placeholder.id
+        let previous = selection
+        pending.append(placeholder)
+        selection = id
+        defer { pending.removeAll { $0.id == id } }
+
+        let created: WorkspaceService.Created
+        do {
+            created = try await Task.detached {
+                try WorkspaceService.create(project: project, name: name, branch: branch, choice: choice, root: root, existing: existing) { step in
+                    DispatchQueue.main.async {
+                        MainActor.assumeIsolated {
+                            if let index = self.pending.firstIndex(where: { $0.id == id }) { self.pending[index].current = step }
+                        }
+                    }
+                }
+            }.value
+        } catch {
+            if selection == id { select(previous) }
+            throw error
+        }
         state.workspaces.append(created.workspace)
         save()
         report(created)
-        selection = created.workspace.id
-        openTab(in: created.workspace.id, command: setupCommand(for: project))
+        // The user may have moved on while git worked.
+        if selection == id { selection = created.workspace.id }
+        openTab(in: created.workspace.id, command: setup)
     }
 
     public func removalCheck(_ id: UUID, deletingBranch: Bool) async -> WorkspaceService.RemovalCheck {

@@ -57,6 +57,36 @@ final class WorkspaceServiceTests: XCTestCase {
         XCTAssertThrowsError(try create("x", branch: "-rf"))
     }
 
+    func testCreateReportsItsStepsInOrder() throws {
+        var steps: [WorkspaceService.CreateStep] = []
+        _ = try WorkspaceService.create(
+            project: project, name: "steps", branch: "eric/steps", choice: .new(base: nil), root: root, existing: []
+        ) { steps.append($0) }
+        XCTAssertEqual(steps, [.fetch, .worktree, .copy])
+
+        project.copyPatterns = []
+        steps = []
+        try Git.run(["branch", "eric/other"], in: project.path)
+        _ = try WorkspaceService.create(
+            project: project, name: "again", branch: "eric/other", choice: .existing, root: root, existing: []
+        ) { steps.append($0) }
+        XCTAssertEqual(steps, [.worktree], "no fetch for an existing branch, no copy without patterns")
+    }
+
+    func testLossLinesSplitIntoCodeAndRest() {
+        let modified = Confirmation.split(" M Sources/a b.swift", maxCode: 2)
+        XCTAssertEqual(modified.code, "M")
+        XCTAssertEqual(modified.rest, "Sources/a b.swift")
+        XCTAssertEqual(Confirmation.split("?? new.txt", maxCode: 2).code, "??")
+        let commit = Confirmation.split("a1c9e27 사이드바 행 높이 조정", maxCode: 40)
+        XCTAssertEqual(commit.code, "a1c9e27")
+        XCTAssertEqual(commit.rest, "사이드바 행 높이 조정")
+        // An error line has no short code: shown whole.
+        let failure = Confirmation.split("상태를 확인하지 못했습니다: 권한 없음", maxCode: 2)
+        XCTAssertEqual(failure.code, "")
+        XCTAssertEqual(failure.rest, "상태를 확인하지 못했습니다: 권한 없음")
+    }
+
     func testExistingBranchCheckout() throws {
         try Git.run(["branch", "review/pr-1"], in: project.path)
         let ws = try create("pr-1", branch: "review/pr-1", choice: .existing).workspace
@@ -144,6 +174,13 @@ final class WorkspaceServiceTests: XCTestCase {
         XCTAssertNil(WorkspaceNaming.folderName(for: ".."))
         XCTAssertNil(WorkspaceNaming.worktreePath(root: "/tmp/r", project: "p", workspace: ""))
         XCTAssertEqual(WorkspaceNaming.worktreePath(root: "/tmp/r", project: "p", workspace: "w"), "/tmp/r/p/w")
+    }
+
+    func testTabTitle() {
+        XCTAssertEqual(TabTitle.display("dev@macbook:~/work/shop-web", shell: "zsh"), "zsh")
+        XCTAssertEqual(TabTitle.display("", shell: "zsh"), "zsh")
+        XCTAssertEqual(TabTitle.display("claude", shell: "zsh"), "claude")
+        XCTAssertEqual(TabTitle.display("vim notes@home.md", shell: "zsh"), "vim notes@home.md")
     }
 
     func testStatusMessageParsing() {

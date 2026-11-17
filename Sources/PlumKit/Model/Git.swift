@@ -53,7 +53,7 @@ public enum Git {
         // waitUntilExit() spins the run loop and can return ~100 ms late.
         let exited = DispatchSemaphore(value: 0)
         process.terminationHandler = { _ in exited.signal() }
-        do { try process.run() } catch { throw GitError(message: "git을 실행할 수 없습니다: \(error.localizedDescription)") }
+        do { try process.run() } catch { throw GitError(message: String(localized: "git을 실행할 수 없습니다: \(error.localizedDescription)")) }
 
         // Drain both pipes while git runs, or a chatty command fills one and stalls.
         var errorData = Data()
@@ -69,8 +69,8 @@ public enum Git {
         let text = String(decoding: output, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
         guard process.terminationReason == .exit, process.terminationStatus == 0 else {
             let detail = String(decoding: errorData, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-            let reason = process.terminationReason == .uncaughtSignal ? "시간 초과 또는 중단됨" : detail
-            throw GitError(message: reason.isEmpty ? "git \(arguments.first ?? "") 실패" : reason)
+            let reason = process.terminationReason == .uncaughtSignal ? String(localized: "시간 초과 또는 중단됨") : detail
+            throw GitError(message: reason.isEmpty ? String(localized: "git \(arguments.first ?? "") 실패") : reason)
         }
         return text
     }

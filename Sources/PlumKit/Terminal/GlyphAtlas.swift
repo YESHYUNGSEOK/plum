@@ -26,6 +26,40 @@ public struct FontSpec: Hashable {
     }
 }
 
+extension FontSpec {
+    /// The font a name stands for: a PostScript, full or family name. A name
+    /// nothing matches gives the system monospaced font, not the proportional
+    /// font Core Text would otherwise substitute.
+    public static func font(named name: String, size: CGFloat) -> CTFont {
+        let system = NSFont.monospacedSystemFont(ofSize: size, weight: .regular) as CTFont
+        guard !name.isEmpty else { return system }
+        let named = CTFontCreateWithName(name as CFString, size, nil)
+        let names = [CTFontCopyPostScriptName(named), CTFontCopyFullName(named), CTFontCopyFamilyName(named)]
+        if names.contains(where: { ($0 as String) == name }) { return named }
+        let descriptor = CTFontDescriptorCreateWithAttributes([kCTFontFamilyNameAttribute: name] as CFDictionary)
+        let family = CTFontCreateWithFontDescriptor(descriptor, size, nil)
+        return (CTFontCopyFamilyName(family) as String) == name ? family : system
+    }
+
+    /// Families of the installed fixed-width fonts, by name. Takes a moment:
+    /// call off the main thread.
+    public static func monospacedFamilies() -> [String] {
+        let collection = CTFontCollectionCreateFromAvailableFonts(nil)
+        let descriptors = CTFontCollectionCreateMatchingFontDescriptors(collection) as? [CTFontDescriptor] ?? []
+        var families = Set<String>()
+        for descriptor in descriptors {
+            let traits = CTFontDescriptorCopyAttribute(descriptor, kCTFontTraitsAttribute) as? [CFString: Any]
+            let symbolic = (traits?[kCTFontSymbolicTrait] as? NSNumber)?.uint32Value ?? 0
+            guard symbolic & CTFontSymbolicTraits.traitMonoSpace.rawValue != 0,
+                  let family = CTFontDescriptorCopyAttribute(descriptor, kCTFontFamilyNameAttribute) as? String,
+                  !family.hasPrefix(".") // system-private faces
+            else { continue }
+            families.insert(family)
+        }
+        return families.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+}
+
 /// Rasterizes glyphs with CoreText into textures shared by every terminal
 /// that uses the same font. Main thread only.
 final class GlyphAtlas {
@@ -59,11 +93,7 @@ final class GlyphAtlas {
     init(device: MTLDevice, spec: FontSpec) {
         self.device = device
         let size = CGFloat(spec.pointSize * spec.scale)
-        let base: CTFont = if spec.name.isEmpty {
-            NSFont.monospacedSystemFont(ofSize: size, weight: .regular) as CTFont
-        } else {
-            CTFontCreateWithName(spec.name as CFString, size, nil)
-        }
+        let base = FontSpec.font(named: spec.name, size: size)
         func variant(_ traits: CTFontSymbolicTraits) -> CTFont {
             CTFontCreateCopyWithSymbolicTraits(base, size, nil, traits, traits) ?? base
         }

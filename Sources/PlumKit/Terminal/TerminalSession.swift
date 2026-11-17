@@ -26,16 +26,16 @@ public enum TerminalSignal {
 }
 
 public struct TerminalTheme {
-    public var foreground: (UInt8, UInt8, UInt8) = (0xdc, 0xdf, 0xe4)
-    public var background: (UInt8, UInt8, UInt8) = (0x16, 0x18, 0x1d)
-    public var cursor: (UInt8, UInt8, UInt8) = (0xdc, 0xdf, 0xe4)
-    public var selection: (UInt8, UInt8, UInt8) = (0x3a, 0x4a, 0x6b)
+    public var foreground: (UInt8, UInt8, UInt8) = (0xDC, 0xDC, 0xE2)
+    public var background: (UInt8, UInt8, UInt8) = (0x1A, 0x1A, 0x1D)
+    public var cursor: (UInt8, UInt8, UInt8) = (0xC5, 0x8A, 0xF9)
+    public var selection: (UInt8, UInt8, UInt8) = (0x45, 0x39, 0x5A)
     /// The 16 ANSI colors; the other 240 palette entries keep the library defaults.
     public var ansi: [(UInt8, UInt8, UInt8)] = [
-        (0x1d, 0x1f, 0x21), (0xe0, 0x6c, 0x75), (0x98, 0xc3, 0x79), (0xe5, 0xc0, 0x7b),
-        (0x61, 0xaf, 0xef), (0xc6, 0x78, 0xdd), (0x56, 0xb6, 0xc2), (0xab, 0xb2, 0xbf),
-        (0x5c, 0x63, 0x70), (0xe8, 0x82, 0x8a), (0xa9, 0xd1, 0x8a), (0xeb, 0xcb, 0x8b),
-        (0x7a, 0xbb, 0xf2), (0xd1, 0x8c, 0xe6), (0x6c, 0xc4, 0xcf), (0xf2, 0xf4, 0xf8),
+        (0x2A, 0x2A, 0x2F), (0xFF, 0x8E, 0x8E), (0x7B, 0xD8, 0x8F), (0xF5, 0xB4, 0x53),
+        (0x7C, 0xB7, 0xFF), (0xC5, 0x8A, 0xF9), (0x7D, 0xD3, 0xFC), (0xDC, 0xDC, 0xE2),
+        (0x6E, 0x6E, 0x78), (0xFF, 0xAA, 0xAA), (0x9B, 0xE3, 0xAA), (0xF8, 0xC7, 0x7E),
+        (0xA3, 0xCC, 0xFF), (0xD6, 0xAA, 0xFC), (0xA5, 0xE1, 0xFD), (0xFF, 0xFF, 0xFF),
     ]
     public init() {}
 }
@@ -406,6 +406,18 @@ public final class TerminalSession {
         if pid > 0 { kill(pid, SIGHUP) }
     }
 
+    /// The program in the foreground (an agent, an editor, a build), or nil
+    /// when the shell is at its prompt. Closing the tab would end it.
+    public func foregroundProgram() -> String? {
+        ioQueue.sync {
+            guard masterFD >= 0, pid > 0 else { return nil }
+            let group = tcgetpgrp(masterFD)
+            guard group > 0, group != pid else { return nil }
+            var name = [CChar](repeating: 0, count: 64)
+            return proc_name(group, &name, UInt32(name.count)) > 0 ? String(cString: name) : String(localized: "알 수 없는 프로그램")
+        }
+    }
+
     // MARK: Size and scrolling
 
     public func resize(cols: UInt16, rows: UInt16, cellWidthPx: UInt32, cellHeightPx: UInt32) {
@@ -582,6 +594,25 @@ public final class TerminalSession {
         }
     }
 
+    /// The logical line under a viewport cell (rows joined where the text
+    /// wrapped) and the UTF-16 offset of that cell's character in it.
+    public func line(at point: (Int, Int)) -> (text: String, offset: Int)? {
+        withTerminal { terminal in
+            guard let ref = gridRef(terminal, viewport: point) else { return nil }
+            var options = GhosttyTerminalSelectLineOptions()
+            options.size = MemoryLayout<GhosttyTerminalSelectLineOptions>.size
+            options.ref = ref
+            var line = GhosttySelection()
+            guard ghostty_terminal_select_line(terminal, &options, &line) == GHOSTTY_SUCCESS else { return nil }
+            let text = format(terminal, selection: &line)
+            // From the line's start through the cell: its length places the
+            // cell in the text, whatever the widths of the characters before.
+            var upToCell = GhosttySelection(start: line.start, end: ref, rectangle: false)
+            let before = format(terminal, selection: &upToCell)
+            return (text, max(0, (before as NSString).length - 1))
+        }
+    }
+
     public func clearSelection() {
         withTerminal { _ = ghostty_terminal_set($0, GHOSTTY_TERMINAL_OPT_SELECTION, nil) }
     }
@@ -630,8 +661,11 @@ public final class TerminalSession {
     /// Feeds bytes straight into the terminal, as if the program had printed
     /// them. For tests.
     public func feed(_ text: String) {
-        let bytes = Array(text.utf8)
-        withTerminal { ghostty_terminal_vt_write($0, bytes, bytes.count) }
+        Array(text.utf8).withUnsafeBytes { feed($0) }
+    }
+
+    public func feed(_ bytes: UnsafeRawBufferPointer) {
+        withTerminal { ghostty_terminal_vt_write($0, bytes.bindMemory(to: UInt8.self).baseAddress, bytes.count) }
     }
 }
 

@@ -27,41 +27,59 @@ public enum WorkspaceService {
         public var rejectedPatterns: [String]
     }
 
-    public static func create(
+    /// The steps of making a workspace, in the order they run.
+    public enum CreateStep: Equatable, Sendable { case fetch, worktree, copy }
+
+    /// The checks `create` makes before touching anything: quick enough to
+    /// run while the user is still in the form. Returns the worktree path.
+    public static func validate(
         project: Project, name: String, branch: String, choice: BranchChoice,
         root: String, existing: [Workspace]
-    ) throws -> Created {
+    ) throws -> String {
         let name = name.trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty else { throw GitError(message: "워크스페이스 이름을 입력하세요.") }
+        guard !name.isEmpty else { throw GitError(message: String(localized: "워크스페이스 이름을 입력하세요.")) }
         guard let path = WorkspaceNaming.worktreePath(root: root, project: project.name, workspace: name) else {
-            throw GitError(message: "이 이름으로는 폴더를 만들 수 없습니다: \(name)")
+            throw GitError(message: String(localized: "이 이름으로는 폴더를 만들 수 없습니다: \(name)"))
         }
         guard !existing.contains(where: { $0.projectID == project.id && (samePath($0.path, path) || $0.name == name) }) else {
-            throw GitError(message: "같은 이름의 워크스페이스가 이미 있습니다: \(name)")
+            throw GitError(message: String(localized: "같은 이름의 워크스페이스가 이미 있습니다: \(name)"))
         }
         guard !FileManager.default.fileExists(atPath: path) else {
-            throw GitError(message: "폴더가 이미 있습니다: \(path)")
+            throw GitError(message: String(localized: "폴더가 이미 있습니다: \(path)"))
         }
         guard Git.isValidBranchName(branch) else {
-            throw GitError(message: "브랜치 이름으로 쓸 수 없습니다: \(branch)")
+            throw GitError(message: String(localized: "브랜치 이름으로 쓸 수 없습니다: \(branch)"))
         }
+        if case .new = choice, Git.branchExists(branch, in: project.path) {
+            throw GitError(message: String(localized: "브랜치가 이미 있습니다: \(branch). \"기존 브랜치\"를 선택하세요."))
+        }
+        return path
+    }
+
+    /// `progress` is told each step as it starts, on the calling thread.
+    public static func create(
+        project: Project, name: String, branch: String, choice: BranchChoice,
+        root: String, existing: [Workspace], progress: (CreateStep) -> Void = { _ in }
+    ) throws -> Created {
+        let path = try validate(project: project, name: name, branch: branch, choice: choice, root: root, existing: existing)
+        let name = name.trimmingCharacters(in: .whitespaces)
 
         var base: String?
         if case let .new(requested) = choice {
-            guard !Git.branchExists(branch, in: project.path) else {
-                throw GitError(message: "브랜치가 이미 있습니다: \(branch). \"기존 브랜치\"를 선택하세요.")
-            }
+            progress(.fetch)
             Git.fetch(in: project.path)
             let chosen = requested ?? project.baseBranch
             base = chosen.isEmpty ? Git.defaultBase(in: project.path) : chosen
         }
 
+        progress(.worktree)
         try FileManager.default.createDirectory(
             at: URL(fileURLWithPath: path).deletingLastPathComponent(), withIntermediateDirectories: true)
         try Git.addWorktree(repository: project.path, path: path, branch: branch, newBranchFrom: base)
 
         // For a remote branch, the worktree's local branch drops the remote name.
         let actualBranch = Git.worktrees(in: project.path).first { samePath($0.path, path) }?.branch ?? branch
+        if !project.copyPatterns.isEmpty { progress(.copy) }
         let files = WorkspaceFiles.copy(patterns: project.copyPatterns, from: project.path, to: path)
         return Created(
             workspace: Workspace(projectID: project.id, name: name, branch: actualBranch, path: path),
@@ -76,7 +94,7 @@ public enum WorkspaceService {
                 check.uncommitted = try Git.uncommittedChanges(in: workspace.path)
             } catch {
                 // Unknown is not clean: make the user confirm explicitly.
-                check.uncommitted = ["상태를 확인하지 못했습니다: \(error.localizedDescription)"]
+                check.uncommitted = [String(localized: "상태를 확인하지 못했습니다: \(error.localizedDescription)")]
             }
         }
         if deletingBranch { check.unpushed = Git.unpushedCommits(on: workspace.branch, in: project.path) }
@@ -91,12 +109,12 @@ public enum WorkspaceService {
             // git doesn't know this path. If the folder is gone too there is
             // nothing left to do; otherwise it isn't ours to delete.
             guard !FileManager.default.fileExists(atPath: workspace.path) else {
-                throw GitError(message: "이 폴더는 \(project.name)의 워크트리가 아니어서 지우지 않았습니다: \(workspace.path)")
+                throw GitError(message: String(localized: "이 폴더는 \(project.name)의 워크트리가 아니어서 지우지 않았습니다: \(workspace.path)"))
             }
             return
         }
         guard index != 0, !samePath(workspace.path, project.path) else {
-            throw GitError(message: "프로젝트의 기본 체크아웃은 지울 수 없습니다.")
+            throw GitError(message: String(localized: "프로젝트의 기본 체크아웃은 지울 수 없습니다."))
         }
         try Git.removeWorktree(repository: project.path, path: workspace.path, force: force)
     }
@@ -104,10 +122,10 @@ public enum WorkspaceService {
     /// Recreates the worktree of an archived workspace from its kept branch.
     public static func restore(_ workspace: Workspace, project: Project) throws -> Created {
         guard !FileManager.default.fileExists(atPath: workspace.path) else {
-            throw GitError(message: "폴더가 이미 있습니다: \(workspace.path)")
+            throw GitError(message: String(localized: "폴더가 이미 있습니다: \(workspace.path)"))
         }
         guard Git.branchExists(workspace.branch, in: project.path) else {
-            throw GitError(message: "브랜치가 없어 복원할 수 없습니다: \(workspace.branch)")
+            throw GitError(message: String(localized: "브랜치가 없어 복원할 수 없습니다: \(workspace.branch)"))
         }
         try FileManager.default.createDirectory(
             at: URL(fileURLWithPath: workspace.path).deletingLastPathComponent(), withIntermediateDirectories: true)

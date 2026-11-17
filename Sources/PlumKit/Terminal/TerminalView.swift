@@ -158,7 +158,7 @@ public final class TerminalView: NSView, NSTextInputClient {
         let height = Int((bounds.height * scale).rounded(.down))
         metalLayer.contentsScale = scale
         metalLayer.drawableSize = CGSize(width: width, height: height)
-        renderer.padding = Int((4 * scale).rounded())
+        renderer.padding = Int((14 * scale).rounded())
 
         let m = renderer.metrics
         let cols = max(2, (width - 2 * renderer.padding) / m.cellWidth)
@@ -448,6 +448,12 @@ public final class TerminalView: NSView, NSTextInputClient {
         window?.makeFirstResponder(self)
         guard let session else { return }
         let cell = cell(at: event)
+        // ⌘-click opens a web link, as in other macOS terminals.
+        if event.modifierFlags.contains(.command), event.clickCount == 1,
+           let line = session.line(at: cell), let url = webLink(in: line.text, at: line.offset) {
+            TerminalView.openLink(url)
+            return
+        }
         switch event.clickCount {
         case 1:
             session.clearSelection()
@@ -487,6 +493,37 @@ public final class TerminalView: NSView, NSTextInputClient {
         requestFrame()
     }
 
+    // MARK: Links
+
+    /// Opens a clicked link. Scripted checks swap it out so nothing opens.
+    static var openLink: (URL) -> Void = { NSWorkspace.shared.open($0) }
+    /// Where paste reads from. Scripted checks use their own, so the user's
+    /// clipboard is never touched.
+    static var pasteboard = NSPasteboard.general
+
+    /// The middle of a viewport cell, in window coordinates.
+    func windowPoint(column: Int, row: Int) -> NSPoint {
+        let m = renderer.metrics
+        let point = NSPoint(
+            x: (Double(renderer.padding) + (Double(column) + 0.5) * Double(m.cellWidth)) / scale,
+            y: (Double(renderer.padding) + (Double(row) + 0.5) * Double(m.cellHeight)) / scale)
+        return convert(point, to: nil)
+    }
+
+    /// The http(s) link covering a UTF-16 offset in a line of terminal text.
+    /// Other schemes are left alone: a file link in program output could
+    /// point at something that runs.
+    static func webLink(in text: String, at offset: Int) -> URL? {
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return nil }
+        let range = NSRange(location: 0, length: (text as NSString).length)
+        return detector.matches(in: text, range: range)
+            .first { NSLocationInRange(offset, $0.range) }
+            .flatMap(\.url)
+            .flatMap { ["http", "https"].contains($0.scheme?.lowercased() ?? "") ? $0 : nil }
+    }
+
+    private func webLink(in text: String, at offset: Int) -> URL? { Self.webLink(in: text, at: offset) }
+
     // MARK: Accessibility
 
     // VoiceOver reads the visible screen as one text area.
@@ -494,7 +531,7 @@ public final class TerminalView: NSView, NSTextInputClient {
     // NSAccessibilityNavigableStaticText when someone relies on it.
     override public func isAccessibilityElement() -> Bool { true }
     override public func accessibilityRole() -> NSAccessibility.Role? { .textArea }
-    override public func accessibilityLabel() -> String? { "터미널" }
+    override public func accessibilityLabel() -> String? { String(localized: "터미널") }
     override public func accessibilityValue() -> Any? { session?.screenText() }
 
     // MARK: Clipboard
@@ -505,17 +542,17 @@ public final class TerminalView: NSView, NSTextInputClient {
         NSPasteboard.general.setString(text, forType: .string)
     }
 
+    /// Asks before a paste that could run commands (lines, no bracketed
+    /// paste); calls back with the answer. Without it such pastes are refused.
+    public var confirmPaste: ((String, @escaping (Bool) -> Void) -> Void)?
+
     @objc public func paste(_ sender: Any?) {
-        guard let session, let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else { return }
-        if session.paste(text) == .needsConfirmation {
-            let alert = NSAlert()
-            alert.messageText = "여러 줄을 붙여 넣을까요?"
-            alert.informativeText = "붙여 넣는 내용에 줄바꿈이 있어 명령이 바로 실행될 수 있습니다.\n\n\(text.prefix(300))"
-            alert.addButton(withTitle: "붙여넣기")
-            alert.addButton(withTitle: "취소")
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard let session, let text = TerminalView.pasteboard.string(forType: .string), !text.isEmpty else { return }
+        guard session.paste(text) == .needsConfirmation else { return didInput() }
+        confirmPaste?(text) { [weak self] confirmed in
+            guard confirmed else { return }
             _ = session.paste(text, allowUnsafe: true)
+            self?.didInput()
         }
-        didInput()
     }
 }
