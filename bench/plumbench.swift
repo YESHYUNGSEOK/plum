@@ -8,6 +8,8 @@
 //   plumbench children <pid>
 //   plumbench window <pid>
 //   plumbench place <pid> <x> <y>
+//   plumbench minimize <pid> <0|1>
+//   plumbench click <pid> <x> <y>
 //   plumbench frames <pid> <seconds>
 //   plumbench latency <pid> <samples> <out.csv> [pause ms]
 //
@@ -348,6 +350,33 @@ case "place":
     var point = CGPoint(x: x, y: y)
     guard let position = AXValueCreate(.cgPoint, &point),
           AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, position) == .success else { fail("could not move the window") }
+    print("ok")
+
+case "click":
+    // A left click at a point given from the window's top-left corner, sent
+    // to the app only (the pointer on screen does not move).
+    guard arguments.count >= 5, let pid = Int32(arguments[2]), let dx = Double(arguments[3]), let dy = Double(arguments[4]),
+          let window = mainWindow(of: pid, onScreenOnly: true) ?? mainWindow(of: pid, onScreenOnly: false) else {
+        fail("usage: plumbench click <pid> <x> <y>")
+    }
+    let point = CGPoint(x: window.bounds.minX + dx, y: window.bounds.minY + dy)
+    for type in [CGEventType.leftMouseDown, .leftMouseUp] {
+        guard let event = CGEvent(mouseEventSource: CGEventSource(stateID: .hidSystemState), mouseType: type, mouseCursorPosition: point, mouseButton: .left) else { continue }
+        event.setIntegerValueField(.mouseEventClickState, value: 1)
+        event.postToPid(pid)
+        usleep(30000)
+    }
+    print("ok")
+
+case "minimize":
+    // Minimizes or restores the app's window. A minimized window is not
+    // drawn, which separates the cost of drawing from everything else.
+    guard arguments.count >= 4, let pid = Int32(arguments[2]) else { fail("usage: plumbench minimize <pid> <0|1>") }
+    var value: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(AXUIElementCreateApplication(pid), kAXWindowsAttribute as CFString, &value) == .success,
+          let windows = value as? [AXUIElement], let window = windows.first,
+          AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, arguments[3] == "1" ? kCFBooleanTrue : kCFBooleanFalse) == .success
+    else { fail("could not minimize the window") }
     print("ok")
 
 case "frames":
