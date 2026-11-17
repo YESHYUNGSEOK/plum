@@ -13,6 +13,8 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$(swift build -c release --show-bin-path)/Plum" "$APP/Contents/MacOS/Plum"
 strip -x "$APP/Contents/MacOS/Plum"
 cp Vendor/LICENSE-ghostty "$APP/Contents/Resources/LICENSE-ghostty.txt"
+# Resources/AppIcon.icns is prebuilt from Resources/AppIcon.svg (1024px PNG → iconutil).
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 # Precompile the shader so the app doesn't run the Metal compiler at launch.
 if xcrun -sdk macosx -f metal >/dev/null 2>&1; then
@@ -34,6 +36,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleDisplayName</key><string>Plum</string>
     <key>CFBundleIdentifier</key><string>dev.plum.Plum</string>
     <key>CFBundleExecutable</key><string>Plum</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>0.1.0</string>
     <key>CFBundleVersion</key><string>1</string>
