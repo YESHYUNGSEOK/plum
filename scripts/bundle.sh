@@ -15,6 +15,9 @@ strip -x "$APP/Contents/MacOS/Plum"
 cp Vendor/LICENSE-ghostty "$APP/Contents/Resources/LICENSE-ghostty.txt"
 # Resources/AppIcon.icns is prebuilt from Resources/AppIcon.svg (1024px PNG → iconutil).
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+# UI text: Korean is the source language, English is translated. Other
+# languages fall back to English (the development region below).
+cp -R Resources/en.lproj Resources/ko.lproj "$APP/Contents/Resources/"
 
 # Precompile the shader so the app doesn't run the Metal compiler at launch.
 if xcrun -sdk macosx -f metal >/dev/null 2>&1; then
@@ -40,7 +43,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>0.1.0</string>
     <key>CFBundleVersion</key><string>1</string>
-    <key>CFBundleDevelopmentRegion</key><string>ko</string>
+    <key>CFBundleDevelopmentRegion</key><string>en</string>
+    <key>CFBundleLocalizations</key><array><string>en</string><string>ko</string></array>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
     <key>LSMultipleInstancesProhibited</key><true/>
