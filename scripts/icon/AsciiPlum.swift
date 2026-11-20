@@ -1,7 +1,7 @@
 import AppKit
 
-/// The README's ASCII plum turning, small enough for the Dock. The frames
-/// are made by scripts/readme-plum.py, in AsciiPlumFrames.swift.
+/// The README's ASCII plum, small, for the app icon (scripts/make-icon.sh).
+/// The frames are made by scripts/readme-plum.py, in AsciiPlumFrames.swift.
 struct AsciiPlum {
     struct Run {
         let column: Int
@@ -56,67 +56,23 @@ struct AsciiPlum {
 }
 
 /// Plum's icon: the plum on a dark square, larger than the square and cut
-/// off by it. Resources/AppIcon.icns is this view at `iconFrame`
-/// (scripts/make-icon.sh); in the Dock, while Plum runs, it turns from there.
-final class DockPlumView: NSView {
-    /// The frame with the leaf in sight.
-    static let iconFrame = 17
-    private var index = iconFrame
-    private var timer: Timer?
-    /// Called after each new frame (a Dock tile has to be told to redraw).
-    var onFrame: (() -> Void)?
-    /// Turning, unless Reduce Motion is on; still, it shows one frame.
-    var spinning = false {
-        didSet { if spinning != oldValue { restart() } }
-    }
-
-    /// Each frame drawn once and kept: laying out the characters every
-    /// frame cost more than all the rest of an idle Plum.
-    private lazy var images = [NSImage?](repeating: nil, count: AsciiPlum.shared.frames.count)
+/// off by it, at an angle where neither leaf nor stem shows.
+final class PlumIconView: NSView {
+    static let frameIndex = 32
 
     override var isFlipped: Bool { true }
 
     override func draw(_ dirtyRect: NSRect) {
-        let index = index
-        if images[index]?.size != bounds.size {
-            images[index] = NSImage(size: bounds.size, flipped: true) { rect in
-                Self.draw(frame: index, in: rect)
-                return true
-            }
-        }
-        images[index]?.draw(in: bounds)
-    }
-
-    private static func draw(frame index: Int, in bounds: CGRect) {
         // A macOS icon's square: 824 of 1024, corners 185.
         let side = min(bounds.width, bounds.height)
         let square = bounds.insetBy(dx: side * 100 / 1024, dy: side * 100 / 1024)
         let shape = NSBezierPath(roundedRect: square, xRadius: side * 185 / 1024, yRadius: side * 185 / 1024)
         NSColor(hex: 0x0E0B12).setFill()
         shape.fill()
-        // Larger than the square and toward its top right, cut off by its
-        // edge, with room at the bottom left.
+        // Toward the square's top right, cut off by its edge, with room at the bottom left.
         shape.addClip()
         let size = square.width * 1.5
-        AsciiPlum.shared.draw(frame: index, in: CGRect(
+        AsciiPlum.shared.draw(frame: Self.frameIndex, in: CGRect(
             x: square.midX - size / 2 + side * 0.11, y: square.midY - size / 2 - side * 0.13, width: size, height: size))
-    }
-
-    private func restart() {
-        timer?.invalidate()
-        timer = nil
-        guard spinning, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
-        // ponytail: 8 a second costs the Dock about 2% of a core; slower turns cost less.
-        let timer = Timer(timeInterval: 1.0 / 8, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.advance() }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        self.timer = timer
-    }
-
-    private func advance() {
-        index = (index + 1) % AsciiPlum.shared.frames.count
-        needsDisplay = true
-        onFrame?()
     }
 }

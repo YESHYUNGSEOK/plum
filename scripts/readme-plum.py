@@ -32,7 +32,7 @@ FLOOR = ".,::;"
 CHARS = "".join(dict.fromkeys(RAMP + EDGE))
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "docs/assets/plum.svg"
-SWIFT_OUT = ROOT / "Sources/PlumKit/UI/AsciiPlumFrames.swift"   # the small one for the Dock icon
+SWIFT_OUT = ROOT / "scripts/icon/AsciiPlumFrames.swift"   # the small one, for the app icon
 
 BACK, BAR_FILL, LINE, TITLE = "#141417", "#1E1E22", "#2C2C32", "#8E8E99"
 RAMPS = {  # dark to light; the last skin color is the highlight
@@ -81,7 +81,7 @@ def parts(q):
     k0 = np.linalg.norm(q / RADII, axis=1)
     k1 = np.linalg.norm(q / RADII**2, axis=1)
     body = k0 * (k0 - 1) / np.maximum(k1, 1e-9)
-    body = body + 0.09 * np.exp(-((x / 0.14) ** 2)) * smoothstep(-0.2, 0.5, z)    # seam
+    body = body + SEAM_DEPTH * np.exp(-((x / SEAM_WIDTH) ** 2)) * smoothstep(-0.2, 0.5, z)    # seam
     body = body + 0.2 * np.exp(-(x * x + z * z) / 0.05) * smoothstep(0.45, 1.0, y)  # hollow
     stem = np.minimum(capsule(q, S0, S1, 0.05), capsule(q, S1, S2, 0.042))
     d = q - LEAF_A
@@ -99,6 +99,7 @@ PITCH, ROLL = 0.22, -0.2            # the axis leans toward the viewer and to th
 CENTER = np.array([0.0, 0.08, 0.0])
 GROUND = -1.2
 SHADOW = True
+SEAM_DEPTH, SEAM_WIDTH, SEAM_DARK, SEAM_LINE = 0.09, 0.14, 0.55, 0.06   # the groove, and the dark line in it
 EYE, LOOK = np.array([0, 1.9, 7.4]), np.array([0, 0.05, 0])
 VIEW_H = 3.45                        # world height of the grid at LOOK
 L_KEY, L_FILL = norm([-0.55, 0.8, 0.55]), norm([0.9, 0.1, 0.35])
@@ -195,7 +196,7 @@ def shade(theta, ro, rd):
     skin = 0.06 + 0.82 * np.clip((n @ L_KEY + 0.2) / 1.2, 0, 1) ** 1.3 * (0.25 + 0.75 * sh) + 0.14 * fill
     skin = (skin + 0.22 * (1 - ndv) ** 2.5) * (0.4 + 0.6 * ao) + 0.5 * hl
     q = (p - CENTER) @ R
-    skin = skin * (1 - 0.55 * np.exp(-((q[:, 0] / 0.06) ** 2)) * smoothstep(-0.1, 0.4, q[:, 2]))  # the seam's line
+    skin = skin * (1 - SEAM_DARK * np.exp(-((q[:, 0] / SEAM_LINE) ** 2)) * smoothstep(-0.1, 0.4, q[:, 2]))  # the seam's line
 
     nn = np.where(((n * v).sum(1) < 0)[:, None], -n, n)
     leafl = 0.08 + 0.78 * np.clip(nn @ L_KEY, 0, 1) * sh + 0.22 * np.clip(-(nn @ L_KEY), 0, 1)
@@ -377,7 +378,7 @@ extension AsciiPlum {{
 
 
 def main():
-    global COLS, ROWS, VIEW_H, LOOK, SHADOW
+    global COLS, ROWS, VIEW_H, LOOK, SHADOW, SEAM_DEPTH, SEAM_WIDTH, SEAM_DARK, SEAM_LINE
     ink = glyphs()
     dense = ramp(ink)
     print("ramp:", "".join(CHARS[i] for i in dense))
@@ -388,8 +389,10 @@ def main():
     if len(sys.argv) > 1:
         preview(frames, sys.argv[1], [int(a) for a in sys.argv[2:]] or [0, FRAMES // 4])
 
-    # Small, framed tight and without the floor, for icon sizes.
+    # Small, framed tight and without the floor, for the app icon.
     COLS, ROWS, VIEW_H, LOOK, SHADOW = 28, 13, 2.8, np.array([0, 0.2, 0]), False
+    # A cell is wide here: a deeper, wider seam so it still shows at icon sizes.
+    SEAM_DEPTH, SEAM_WIDTH, SEAM_DARK, SEAM_LINE = 0.14, 0.18, 0.9, 0.13
     SWIFT_OUT.write_text(swift(render(36, ink, dense)))
     print(f"{SWIFT_OUT} {SWIFT_OUT.stat().st_size / 1024:.0f} KB")
 

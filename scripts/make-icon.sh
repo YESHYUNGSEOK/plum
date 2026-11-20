@@ -1,13 +1,12 @@
 #!/bin/zsh
-# Makes Resources/AppIcon.icns: the Dock's turning plum (DockPlumView in
-# Sources/PlumKit/UI/AsciiPlum.swift) at its icon frame, drawn by that same
-# code at every icon size.
+# Makes Resources/AppIcon.icns: the README's plum on a dark square
+# (PlumIconView in scripts/icon/AsciiPlum.swift), drawn at every icon size.
 set -euo pipefail
 ROOT=${0:A:h:h}
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 cat > "$TMP/main.swift" <<'SWIFT'
 import AppKit
-extension NSColor { // as in Theme.swift, which brings the rest of the UI with it
+extension NSColor {
     convenience init(hex: UInt32) {
         self.init(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255,
                   blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
@@ -18,7 +17,7 @@ MainActor.assumeIsolated {
     for points in [16, 32, 128, 256, 512] {
         for scale in [1, 2] {
             let pixels = points * scale
-            let view = DockPlumView(frame: NSRect(x: 0, y: 0, width: pixels, height: pixels))
+            let view = PlumIconView(frame: NSRect(x: 0, y: 0, width: pixels, height: pixels))
             // A bitmap of exactly that many pixels, whatever the screen's scale.
             let rep = NSBitmapImageRep(
                 bitmapDataPlanes: nil, pixelsWide: pixels, pixelsHigh: pixels, bitsPerSample: 8, samplesPerPixel: 4,
@@ -31,7 +30,7 @@ MainActor.assumeIsolated {
     }
 }
 SWIFT
-swiftc -O -o "$TMP/icon" "$ROOT/Sources/PlumKit/UI/AsciiPlum.swift" "$ROOT/Sources/PlumKit/UI/AsciiPlumFrames.swift" "$TMP/main.swift"
+swiftc -O -o "$TMP/icon" "$ROOT/scripts/icon/AsciiPlum.swift" "$ROOT/scripts/icon/AsciiPlumFrames.swift" "$TMP/main.swift"
 mkdir "$TMP/AppIcon.iconset"
 "$TMP/icon" "$TMP/AppIcon.iconset"
 iconutil -c icns -o "$ROOT/Resources/AppIcon.icns" "$TMP/AppIcon.iconset"

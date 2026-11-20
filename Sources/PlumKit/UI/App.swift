@@ -60,13 +60,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         notifications?.delegate = self
         // The Dock badge needs no permission, unlike notifications.
         updateBadge()
-        // While Plum runs, its Dock icon is the README's plum turning.
-        let tile = NSApp.dockTile
-        dockPlum.frame = NSRect(origin: .zero, size: tile.size)
-        dockPlum.onFrame = { tile.display() }
-        tile.contentView = dockPlum
-        dockPlum.spinning = true
-        tile.display()
         model.start(debug: debug)
         if debug {
             // Scripted runs must not grab the keyboard from whoever is
@@ -150,7 +143,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     /// What happened to each notification, for scripted checks.
     private var notificationLog: [String] = []
-    private let dockPlum = DockPlumView()
     private func updateBadge() {
         withObservationTracking {
             let pending = model.statuses.values.filter { $0 == .waiting || $0 == .done }.count
