@@ -38,16 +38,27 @@ To ship a build macOS opens directly, `release.sh` signs with the hardened runti
 2. **Project settings** (the ⋯ next to a project name): what happens when a workspace is made.
    - Files to copy: files outside git (one glob per line, e.g. `.env*`) copied from the main checkout into each new worktree.
    - Setup command, e.g. `pnpm install`.
-   - Agent command, e.g. `claude --settings "$PLUM_CLAUDE_SETTINGS"` (the "Use Claude Code Command" button).
-3. **Add a workspace** (⌘N or the + next to a project): type a name in the palette and press Return. Plum makes a worktree and a branch at `<workspace location>/<project>/<name>`, copies the files, and runs `setup command && agent command` in the first terminal tab.
+3. **Add a workspace** (⌘N or the + next to a project): type a name in the palette, choose what the first tab starts (Terminal, Claude or Codex; the last choice is kept) and press Return. Plum makes a worktree and a branch at `<workspace location>/<project>/<name>`, copies the files, and runs `setup command && agent` in the first terminal tab.
    - A name, folder or branch that's taken is reported while the palette is still open.
    - While it's being made, a row shows in the sidebar and the panel lists the steps (fetch, worktree, copy files). You can keep working in other workspaces meanwhile.
-4. **Clean up** (right-click a workspace):
+4. **What the sidebar shows**: one card per workspace.
+   - Under the name: the branch, uncommitted changed lines (`+12 −3`, new files included) and the pull request. Pull requests come from GitHub every 3 minutes when `gh` is installed and signed in; the color is open, draft, merged or closed, the dot the checks (running, passing, failing). A click opens it.
+   - Then a line per tab: icon (terminal, Claude, Codex), title (for an agent, the conversation title it gives its tab), state, for an agent the time since its state last changed, and ports its programs listen on (`:3000`, a click opens the browser). A click on the line shows that tab; under the pointer, × closes it. Up to four tabs show; the rest fold into a "Show N more tabs" line, which carries the state of any that needs you.
+   - Drag cards to reorder them within a project, `main` included. Click a project's name to fold it; folded, it still shows its agents' state.
+5. **Rename and clean up** (right-click a workspace):
+   - Rename (or double-click its name): changes only the name shown in the sidebar; the folder and branch stay.
    - Archive: removes the worktree folder and keeps the branch, so it can be restored later.
    - Delete: removes the worktree folder and the local branch.
    - Uncommitted changes, commits on no remote and programs that would be ended are listed first. Return means Cancel there.
-5. **Ending things asks first**: closing a tab with a program running in it (⌘W), and quitting (⌘Q or closing the window). A tab at a shell prompt closes right away.
-6. **Links**: ⌘-click an http(s) address in the terminal to open it.
+   - The main checkout can't be deleted; its menu offers removing the project from Plum instead.
+   - Also: Mark as Read, Close All Tabs (keeps the worktree, frees what its programs held), Open In (the editors, terminals and git apps installed), Open PR, Copy (path, branch, PR link).
+   - Right-click a project's name: New Workspace, Project Settings, Collapse, Show in Finder, Open In, Remove from Plum.
+   - Right-click a tab: Rename Tab (or double-click its title; empty gives back the program's title), Close Tab, Close Other Tabs, Close Tabs to the Right.
+   - Right-click (or Control-click) menus are Plum's own: ↑↓ to pick, Return to run, → to open a submenu (Copy, Open In) and ← to close it, Esc or a click outside to dismiss.
+6. **Terminals outlive the app**: a separate terminal host process (the same executable with `--terminal-host`) owns them, as Orca's terminal daemon does. Quit (⌘Q, or close the window) and shells, agents and dev servers keep running; start Plum again and tabs come back in their order, with their screen and scrollback, titles (yours and the agents' conversation titles), which one was open, and agent states reported meanwhile (waiting, done). So quitting doesn't ask. With no terminals left, the host ends itself after a minute.
+   - Closing a tab with a program running in it (⌘W) asks first; a tab at a shell prompt closes right away.
+   - Not brought back: terminals after a restart of the Mac (the host ends too; resume agent conversations with `claude --resume` or `codex resume`), the shell scrollback behind a full-screen program such as vim, bells and notifications while Plum was closed (hook states are kept).
+7. **Links**: ⌘-click an http(s) address in the terminal to open it.
 
 ### Keyboard
 
@@ -70,7 +81,27 @@ Every command for moving between workspaces and tabs is in the Go menu. The keys
 
 Changed since before 0.1: ⌘1–9 picks a workspace, not a tab (as in cmux and Orca). Tabs are ⌃1–9.
 
-Also: new workspace ⌘N, new tab ⌘T, close tab ⌘W, add project ⌘O, text size ⌘+ ⌘- ⌘0, show/hide sidebar ⌃⌘S; in the terminal, start/end of line ⌘← ⌘→, word left/right ⌥← ⌥→, delete line ⌘⌫. In dialogs Return is the default button and Esc cancels; while a dialog is open, menu shortcuts don't reach the terminal behind it.
+Also: new workspace ⌘N, new tab ⌘T (a terminal; the + after the tabs and the File menu also open Claude or Codex), close tab ⌘W, add project ⌘O, text size ⌘+ ⌘- ⌘0, show/hide sidebar ⌃⌘S (drag its edge to resize, double-click the edge for the default width); in the terminal, start/end of line ⌘← ⌘→, word left/right ⌥← ⌥→, delete line ⌘⌫.
+
+In the terminal:
+- Find ⌘F (scrollback too, ASCII case ignored). Return or ⌘G goes up to older output, ⇧Return or ⇧⌘G back down, Esc closes. The match found is the selection, so ⌘C copies it.
+- Clear ⌘K (scrollback too), Select All ⌘A (scrollback too).
+- Drop a file to type its path, escaped for the shell (a screenshot for Claude Code); dropped text is pasted.
+- Right-click: Copy, Paste, Select All, Find, Clear Screen.
+- Programs that ask for the mouse (vim, htop, tmux) get clicks, drags and the wheel; hold ⇧ to select text instead. In full-screen programs that don't (less, git's pager, man) the wheel presses ↑ and ↓.
+- ⇧Return goes as Esc Return: a new line without sending in Claude Code, Codex and zsh. Programs on the Kitty keyboard protocol get it their way.
+- "Use ⌥ as Meta" in Settings makes ⌥B, ⌥. and the like shell shortcuts, with the English key even while typing Korean.
+- ⌘T and the + after the tabs open a shell in the folder the open tab's shell is in (Claude and Codex tabs start at the workspace's top).
+- Reopen Closed Tab ⇧⌘T: a new shell in that folder, with the title it was given. What ran in it doesn't come back.
+- Previous/Next Command ⌘↑ ⌘↓: the zsh integration (Settings, on by default) marks each prompt (OSC 133). Plum's `.zshenv` is read first, puts your ZDOTDIR back, reads your `.zshenv`, and adds only the marking hooks, as Ghostty and VS Code do. Marks start at the second prompt.
+- Programs writing to the clipboard (OSC 52: vim's `"+y`, tmux, over ssh) reach the Mac's clipboard. Text only; requests to read the clipboard are never answered.
+- Links programs make (OSC 8: `ls --hyperlink`, gh…) open with ⌘-click too, and the pointer becomes a hand over a link while ⌘ is down. File links are shown in Finder, not opened (opening could run them).
+- Full Screen ⌃⌘F. Drop a tab on another to move it there.
+- Split panes: Split Right ⌘D, Split Down ⇧⌘D (also on the terminal's right-click menu). The new pane opens in the folder of the one it split and takes the keyboard. Move between panes with ⌘⌥ and an arrow, or a click; drag the line between them to resize. Panes without the keyboard are dimmed; ⌘W closes the one with it. The tab bar shows a split tab once (named for the pane with the keyboard, with the most pressing state of its panes); the sidebar lists every pane. Splits come back after a restart.
+- Open in New Window ⌥⌘N (or right-click a workspace): the workspace gets a window of its own, without the sidebar; with it in front, menus and shortcuts act on it. A terminal is drawn in one place at a time, so picking that workspace in the main window shows "Go to That Window". Closing the window gives the workspace back to the main window, terminals untouched. Windows left open open again at the next launch.
+- Settings: cursor shape (block, bar, underline) and blink, scrollback per tab (MB), accent color (plum, blue, green, orange, pink, graphite: selection, state lines, the cursor).
+
+In dialogs Return is the default button and Esc cancels; while a dialog is open, menu shortcuts don't reach the terminal behind it.
 
 ### Settings (⌘,)
 
@@ -78,12 +109,19 @@ Also: new workspace ⌘N, new tab ⌘T, close tab ⌘W, add project ⌘O, text s
 - Font size: 8 to 40.
 - Workspace location: `~/plum/workspaces` by default. "Choose…" picks a folder; only full paths starting with `/` or `~` are taken.
 - Branch prefix: e.g. `dev/`, checked against git's branch-name rules when saved.
+- Claude command: `claude --settings "$PLUM_CLAUDE_SETTINGS"` by default; the settings file is what lets Claude report working, waiting and done. Codex command: `codex`. Emptied, each goes back to its default.
+- Permissions: Orca's three choices, with Orca's default, Full Access. Full Access adds `--dangerously-skip-permissions` to Claude and `--dangerously-bypass-approvals-and-sandbox` to Codex: every command runs without asking. Auto-Approve adds `--permission-mode auto` and `--approve-for-me`: the agent approves safe actions itself. Agent's Own Settings adds nothing. A command that already has a permission argument (`--permission-mode`, `-s`, `--yolo`…) keeps it.
+- Show Changes ⇧⌘E (or click the +/− counts in the sidebar, or right-click a workspace): changed files and a diff with line numbers, either "Uncommitted" or "Whole Branch" (since it left its base branch, uncommitted work included). New files show too; each file draws up to 3000 lines.
+- Create PR (in Show Changes, or right-click a workspace): runs `gh pr create --web` in a new tab; gh asks there where to push, then GitHub's form opens in the browser.
+- Existing worktrees: adding a project brings in the worktrees its repository already has (made by hand or by another tool) as workspaces; later ones with "Import Existing Worktrees" on the project's right-click menu. Nothing on disk changes; worktrees without a branch are left out.
+- Updates: once a day Plum asks GitHub for a newer release and says so only when there is one; Plum → "Check for Updates…" asks now. It opens the download page; it doesn't replace itself (unsafe without a signed build). While the repository is private there is no release to find.
+- Trusted folders (on by default): before an agent tab opens, its folder is marked trusted for Claude (`hasTrustDialogAccepted` in `~/.claude.json`) and Codex (`[projects."<folder>"] trust_level = "trusted"` in `~/.codex/config.toml`), so a new worktree doesn't stop at "Do you trust this folder?". Orca does the same. Claude's file is changed under Claude's own lock (`.claude.json.lock`), read again and swapped in whole; nothing is written when the file is missing or unreadable, and a folder Codex already lists is left as it is.
 
 The workspace selected last is selected again at the next launch.
 
 ## Agent status
 
-Tabs and the sidebar show each agent's state by color and shape: working is a turning arc (blue), waiting for input a pulsing dot (orange), done a check (green). The shapes tell them apart without color, and they stop moving with Reduce Motion on. Workspaces that are waiting or done gather at the top of the sidebar under "Needs attention", whatever their project. When a tab you aren't looking at starts waiting or finishes, the Dock icon shows a count and bounces once.
+Tabs and the sidebar show each agent's state as a ring: none is a faint ring, working a ring with a turning gap (blue), monitoring a faint ring with a pulse line drawn and wiped inside (teal), waiting for input a thick breathing ring (orange), done a filled disc with a check (green). Weight, fill, the line inside and motion tell them apart without color, and they stop moving with Reduce Motion on. Monitoring means Claude's turn is over but background work it started (a command, a monitor, a scheduled wakeup) will wake it again, as Orca judges it, from the Stop hook's `background_tasks` and `session_crons`; there is nothing to do, so it isn't listed under "Needs attention". Workspaces that are waiting or done gather at the top of the sidebar under "Needs attention", whatever their project, with chips counting the waiting and the done apart. When a tab you aren't looking at starts waiting or finishes, the Dock icon shows a count and bounces once.
 
 The state comes in three ways:
 
@@ -108,28 +146,34 @@ The details, with dates and numbers, are in the [Korean README](README.ko.md#확
 - **Checked by running it**: worktree creation, file copying, archive/restore/delete with the data-loss checks (automated tests); rendering of styles, colors, Korean and emoji, vim and Claude Code screens; key encoding; agent status from hooks, OSC 7501 and the bell; drawing only while visible; every dialog, the quit and paste confirmations, links, and every shortcut in the table above, sent through the app's real event path; the English UI; a hardened-runtime build.
 - **Dialogs no longer stall the app**: macOS sheets held the main thread about 0.3 s on every open and close (terminal output froze meanwhile). Dialogs are now drawn in the window and animated by Core Animation: the longest stall went from 354 ms to 52 ms (new workspace palette), 331 → 40 ms (settings) and 316 → 18 ms (delete confirmation), measured under a tab title changing ten times a second.
 - **Also checked**: the Korean input-method path (the calls an input method makes while composing and committing), double/triple click, drag selection, wheel scrolling, the screen right after switching workspaces (70 captures), and the Dock badge standing in for refused notifications.
-- **Not checked yet**: typing Korean through the real macOS input method (Return while composing in particular), a real trackpad and mouse (all checks used synthesized events), macOS notifications (refused for ad-hoc signed builds), Developer ID signing and notarization (no certificate here), Codex integration.
+- **Sidebar details (2026-11-19)**: changed-line counts, pull request parsing, folded projects, tab titles, port detection and descriptor isolation have automated tests (40 in all); clicks, drags, menus and renaming were checked in the app with synthesized events, as were Plum's own right-click menus (workspace, project, main checkout, tab; submenus, Esc), renaming a tab by double-clicking it (the window keeps its size and place), and agent tabs' permission flags and trusted folders (against a temporary config folder). Trusting was also checked on a copy of a real `~/.claude.json`: apart from the added keys, the content came back the same. Not seen: whether a real Claude or Codex then skips its trust prompt. A bug from before was fixed: new shells inherited every descriptor the app had open, so a git command running as a tab opened kept the app waiting for its output forever.
+- **Terminals that outlive the app (2026-11-19)**: automated tests (44 in all) and quitting and relaunching the app with a stand-in agent and a web server running: everything listed above came back; the host used 4 MB with seven tabs attached. Heavy output through the host runs at 0.83× a direct pty (152 vs 183 MB/s).
+- **Not checked yet**: quitting and relaunching with a real Claude or Codex running, the sidebar with a real mouse (pull request badges were checked against real `gh` output from a clone of `cli/cli`), real Claude and Codex tab titles (checked with stand-in processes), typing Korean through the real macOS input method (Return while composing in particular), a real trackpad and mouse (all checks used synthesized events), macOS notifications (refused for ad-hoc signed builds), Developer ID signing and notarization (no certificate here), Codex integration.
 
 ## Performance
 
-Measured against Ghostty 1.3.1 on the same Mac (M4 Pro, built-in 120 Hz display), alternating runs; medians. Method, sample sizes and limits: [`docs/benchmarks/2026-11-16.md`](docs/benchmarks/2026-11-16.md).
+Measured against Ghostty 1.4.0 (the latest) and Orca 1.4.259 on the same Mac (M4 Pro, external 75 Hz display), in alternating runs; medians. Method, sample sizes and limits: [`docs/benchmarks/2026-11-17.md`](docs/benchmarks/2026-11-17.md).
 
-| | Plum | Ghostty | Samples |
-|---|---|---|---|
-| App size | 2.1 MB | 62 MB | |
-| Launch → window | 286 ms | 342 ms | 15 each |
-| Launch → shell started | 253 ms | 239 ms | 15 each |
-| Output throughput (7 kinds) | 1.11–2.26× Ghostty | | 10 each |
-| Key press → on screen | 16.2 ms, 17.0 ms | 23.5 ms, 28.2 ms | 2 sessions, 300–400 each |
-| Memory, 1 terminal, idle | 52 MB | 181 MB | 4 each |
-| Memory, 10 terminals | 59 MB | 566 MB | 5 each |
-| Idle CPU (30 s) | 1–4 ms | about 290–340 ms | |
+| | Plum | Ghostty 1.4.0 | Orca | Samples |
+|---|---|---|---|---|
+| App size | 3.0 MB | 67 MB | 726 MB | |
+| Launch → window | 284 ms | 346 ms | 1,050 ms | 15 each |
+| Launch → shell started | 243 ms | 226 ms | — | 15 each |
+| Output throughput, plain text | 119 MB/s | 254 MB/s | 12 MB/s | 10 each |
+| Output throughput, TUI redraw (sync_tui) | 119 MB/s | 156 MB/s | 9 MB/s | 10 each |
+| Output throughput, dense colors (dense_cells) | 137 MB/s | 90 MB/s | 6 MB/s | 10 each |
+| Key press → on screen | 18.5 ms | 24.0 ms | 28.5 ms | 400 each |
+| Memory, 1 terminal, idle | 37 MB | 148 MB | 721 MB | 4 each |
+| Memory, 10 terminals | 49 MB | 214 MB | 896 MB | 5 each |
+| Idle CPU (30 s) | 1 ms | 107 ms | 1,060 ms | 4 each |
 
-The comparison is with the Ghostty 1.3.1 that was installed, not 1.4.0; Plum uses the newer engine (libghostty-vt), so the gaps in throughput and per-tab memory are likely smaller against the latest Ghostty. Latency excludes keyboard and panel response.
+- Ghostty 1.4.0 is faster than Plum on plain text, scrolling and TUI redraws; Plum is faster on dense colors, Unicode and cursor movement. Plum's plain-text limit is in Plum, not in the pty; where exactly is not yet known.
+- Orca's memory and CPU are all of its processes together (app, renderer, GPU, terminal host), not counting the shells.
+- Latency excludes keyboard and panel response.
 
 ## Not there yet
 
-Search in the terminal, mouse reporting (clicks in vim or htop) and wheel scrolling in full-screen programs, a pointer change over links, a light theme, UI languages other than English and Korean, restoring tabs after a restart, split panes, importing existing worktrees, sessions that outlive the app, signed and notarized releases (`release.sh` is ready) and auto-update, an Intel build. Why, and in what order: chapter 14 of the design document.
+A light theme (built, then left out), UI languages other than English and Korean, prompt marks for bash and fish, signed and notarized releases (`release.sh` is ready; it needs a Developer ID certificate) and updates that install themselves, an Intel build. Why, and in what order: chapter 14 of the design document.
 
 ## Code
 
@@ -165,3 +209,5 @@ Please open an issue for bugs and ideas. Before a pull request, run `swift test`
 ## License
 
 MIT, see [`LICENSE`](LICENSE). libghostty-vt is MIT too; its notice is in [`Vendor/LICENSE-ghostty`](Vendor/LICENSE-ghostty) and inside the app at `Contents/Resources/LICENSE-ghostty.txt`.
+
+The Claude and OpenAI marks in the agent picker are trademarks of Anthropic and OpenAI; their outlines come from [Simple Icons](https://simpleicons.org) (CC0).

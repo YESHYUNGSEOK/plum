@@ -22,9 +22,24 @@ enum AppActions {
             guard await ask(model, Confirmation(
                 title: String(localized: "이 탭을 닫을까요?"),
                 summary: String(localized: "실행 중인 ‘\(program)’도 함께 종료됩니다."),
-                symbol: "xmark.square", action: String(localized: "닫기"), destructive: true))
+                action: String(localized: "닫기"), destructive: true))
             else { return }
             model.closeTab(id)
+        }
+    }
+
+    /// Closes several tabs, asking once if programs run in any of them.
+    static func closeTabs(_ model: AppModel, _ ids: [UUID]) {
+        let tabs = model.tabs.values.joined().filter { ids.contains($0.id) }
+        let programs = tabs.compactMap { $0.session.foregroundProgram() }
+        guard !programs.isEmpty else { return tabs.forEach { model.closeTab($0.id) } }
+        Task {
+            guard await ask(model, Confirmation(
+                title: String(localized: "탭 \(tabs.count)개를 닫을까요?"),
+                summary: String(localized: "실행 중인 ‘\(programs.joined(separator: ", "))’도 함께 종료됩니다."),
+                action: String(localized: "닫기"), destructive: true))
+            else { return }
+            for tab in tabs { model.closeTab(tab.id) }
         }
     }
 
@@ -34,7 +49,7 @@ enum AppActions {
             guard await ask(model, Confirmation(
                 title: String(localized: "‘\(project.name)’을 목록에서 제거할까요?"),
                 summary: String(localized: "Plum의 기록만 지웁니다. 저장소와 워크트리 폴더는 그대로 남습니다."),
-                symbol: "minus.circle", note: terminalsNote(openTabs), action: String(localized: "제거"), destructive: false))
+                note: terminalsNote(openTabs), action: String(localized: "제거"), destructive: false))
             else { return }
             model.removeProject(project.id)
         }
@@ -48,7 +63,7 @@ enum AppActions {
                 guard await ask(model, Confirmation(
                     title: String(localized: "‘\(workspace.name)’을 아카이브할까요?"),
                     summary: String(localized: "워크트리 폴더를 지우고 브랜치 \(workspace.branch)는 남깁니다. 나중에 복원할 수 있습니다."),
-                    symbol: "archivebox", sections: losses(check) + running(model, workspace.id), note: terminalsNote(openTabs),
+                    sections: losses(check) + running(model, workspace.id), note: terminalsNote(openTabs),
                     action: check.uncommitted.isEmpty ? String(localized: "아카이브") : String(localized: "변경을 버리고 아카이브"),
                     destructive: !check.uncommitted.isEmpty))
                 else { return }
@@ -65,7 +80,7 @@ enum AppActions {
                 ? String(localized: "로컬 브랜치 \(workspace.branch)를 지웁니다. 되돌릴 수 없습니다.")
                 : String(localized: "워크트리 폴더와 로컬 브랜치 \(workspace.branch)를 지웁니다. 되돌릴 수 없습니다.")
             guard await ask(model, Confirmation(
-                title: String(localized: "‘\(workspace.name)’을 삭제할까요?"), summary: summary, symbol: "trash",
+                title: String(localized: "‘\(workspace.name)’을 삭제할까요?"), summary: summary,
                 sections: losses(check) + running(model, workspace.id), note: terminalsNote(openTabs),
                 action: check.isClean ? String(localized: "삭제") : String(localized: "잃어도 좋으니 삭제"), destructive: true))
             else { return }
@@ -95,6 +110,26 @@ enum AppActions {
     }
 
     /// Shows the question in the window and waits for the answer.
+    /// Asks GitHub for a newer release and offers its page. `quietly` (the
+    /// daily check) says nothing unless there is one.
+    static func checkForUpdates(_ model: AppModel, quietly: Bool) async {
+        do {
+            if let release = try await Updates.newer() {
+                // Don't interrupt a dialog that is already open.
+                guard model.sheet == nil else { return }
+                let open = await ask(model, Confirmation(
+                    title: String(localized: "새 버전이 있습니다: \(release.tag)"),
+                    summary: String(localized: "지금 버전은 \(Updates.current)입니다. 내려받기 페이지를 열까요?"),
+                    sections: [], action: String(localized: "페이지 열기"), destructive: false))
+                if open { NSWorkspace.shared.open(release.page) }
+            } else if !quietly {
+                model.errorMessage = String(localized: "최신 버전입니다 (\(Updates.current)).")
+            }
+        } catch {
+            if !quietly { model.errorMessage = String(localized: "업데이트를 확인하지 못했습니다: \(error.localizedDescription)") }
+        }
+    }
+
     static func ask(_ model: AppModel, _ confirmation: Confirmation) async -> Bool {
         await withCheckedContinuation { continuation in
             confirmation.onAnswer = { continuation.resume(returning: $0) }

@@ -192,6 +192,25 @@ final class WorkspaceServiceTests: XCTestCase {
         XCTAssertNil(StatusMessage.parse(""))
     }
 
+    /// A finished turn is done, unless Claude Code says work is still in
+    /// flight: a subagent keeps it working; a command, a monitor or a
+    /// scheduled wakeup means it is monitoring.
+    func testAStopIsDoneWorkingOrMonitoringByWhatIsStillInFlight() {
+        let id = UUID()
+        func stop(_ json: String) -> (AgentStatus, String)? {
+            StatusMessage.parse("\(id) stop \(json)").map { ($0.status, $0.message) }
+        }
+        XCTAssertEqual(stop(#"{"last_assistant_message":"리팩터링을 마쳤습니다.","background_tasks":[],"session_crons":[]}"#)?.0, .done)
+        XCTAssertEqual(stop(#"{"last_assistant_message":"리팩터링을 마쳤습니다.","background_tasks":[]}"#)?.1, "리팩터링을 마쳤습니다.", "the answer, for the notification")
+        XCTAssertEqual(stop(#"{"background_tasks":[{"id":"t1","type":"shell","status":"running","command":"npm run dev"}]}"#)?.0, .monitoring)
+        XCTAssertEqual(stop(#"{"background_tasks":[{"id":"t2","type":"monitor","status":"running"}]}"#)?.0, .monitoring)
+        XCTAssertEqual(stop(#"{"background_tasks":[],"session_crons":[{"id":"c1","schedule":"*/5 * * * *","recurring":true}]}"#)?.0, .monitoring)
+        XCTAssertEqual(stop(#"{"background_tasks":[{"id":"t3","type":"shell","status":"running"},{"id":"a1","type":"subagent","status":"running"}]}"#)?.0, .working)
+        XCTAssertEqual(stop(#"{"background_tasks":[{"id":"t4","type":"shell","status":"completed"}]}"#)?.0, .done, "finished tasks don't count")
+        XCTAssertEqual(stop("not json")?.0, .done)
+        XCTAssertEqual(stop("")?.0, .done)
+    }
+
     func testHookSettingsIsValidJSONWithExpectedEvents() throws {
         let object = try JSONSerialization.jsonObject(with: HookSettings.claudeSettings()) as? [String: Any]
         let hooks = try XCTUnwrap(object?["hooks"] as? [String: Any])

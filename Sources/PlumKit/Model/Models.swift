@@ -10,7 +10,15 @@ public struct Project: Codable, Identifiable, Equatable {
     /// Untracked files to copy into each new worktree, as globs relative to `path`.
     public var copyPatterns: [String] = []
     public var setupCommand = ""
+    /// Read only to carry a setting of older versions over to
+    /// `AppSettings.claudeCommand`/`codexCommand`; the agent is now chosen
+    /// for each new workspace or tab.
     public var agentCommand = ""
+    /// The name shown for the main checkout, if the user gave it one.
+    public var mainName: String?
+    /// Where the main checkout sits among the project's workspaces in the
+    /// sidebar, if the user moved it; nil for the top.
+    public var mainPosition: Int?
 
     public init(name: String, path: String) {
         self.name = name
@@ -35,6 +43,45 @@ public struct Workspace: Codable, Identifiable, Equatable {
     }
 }
 
+/// What a new tab starts: just the shell, or an agent in it.
+public enum TabProgram: String, Codable, CaseIterable, Identifiable, Sendable {
+    case terminal, claude, codex
+    public var id: Self { self }
+}
+
+/// How much an agent started in a tab may do without asking: Orca's
+/// agent permissions, with the same flags.
+public enum AgentPermission: String, Codable, CaseIterable, Sendable {
+    /// Nothing is asked. Orca's default too.
+    case fullAccess = "full-access"
+    /// The agent approves safe actions itself and asks about the rest.
+    case auto
+    /// Plum adds no flag: the agent's own settings decide.
+    case own
+
+    /// The flag each agent takes for it; none for `own`.
+    func flag(for program: TabProgram) -> String? {
+        switch (self, program) {
+        case (.fullAccess, .claude): "--dangerously-skip-permissions"
+        case (.fullAccess, .codex): "--dangerously-bypass-approvals-and-sandbox"
+        case (.auto, .claude): "--permission-mode auto"
+        case (.auto, .codex): "--approve-for-me"
+        default: nil
+        }
+    }
+
+    /// Arguments that settle permissions on their own: a command that has
+    /// one keeps it, and gets no flag added (as Orca keeps custom arguments).
+    static let ownArguments = [
+        "--permission-mode", "--dangerously-skip-permissions", "--allow-dangerously-skip-permissions",
+        "--approve-for-me", "--dangerously-bypass-approvals-and-sandbox", "--ask-for-approval", "-a",
+        "--sandbox", "-s", "--full-auto", "--yolo",
+    ]
+}
+
+/// The color for selection, focus and the open tab's marks.
+public enum AccentChoice: String, Codable, CaseIterable, Sendable { case plum, blue, green, orange, pink, graphite }
+
 public struct AppSettings: Codable, Equatable {
     /// Empty = the system monospaced font.
     public var fontName = ""
@@ -42,8 +89,75 @@ public struct AppSettings: Codable, Equatable {
     public var workspaceRoot = "~/plum/workspaces"
     /// Prepended to the default branch name of a new workspace, e.g. "eric/".
     public var branchPrefix = ""
+    /// Typed into a new Claude tab. The settings file adds the hooks through
+    /// which Claude reports working, waiting and done.
+    public var claudeCommand = AppSettings.defaultClaudeCommand
+    public var codexCommand = AppSettings.defaultCodexCommand
+    /// What a new workspace's first tab starts: the last choice made.
+    public var newWorkspaceProgram = TabProgram.terminal
+    public var agentPermission = AgentPermission.fullAccess
+    /// Tell Claude and Codex a workspace is trusted before they first open
+    /// in it, so they don't stop to ask.
+    public var trustWorkspaces = true
+    /// ⌥ sends Esc before the key (Meta) instead of typing macOS's symbols.
+    public var optionAsMeta = false
+    /// zsh marks its prompts for Plum (⌘↑ and ⌘↓ between commands).
+    public var shellIntegration = true
+    public var cursorShape = TerminalSession.CursorShape.block
+    public var cursorBlinks = false
+    /// Output kept to scroll back to, per tab.
+    public var scrollbackMB = 10
+    public var accent = AccentChoice.plum
+
+    public static let defaultClaudeCommand = "claude --settings \"$PLUM_CLAUDE_SETTINGS\""
+    public static let defaultCodexCommand = "codex"
 
     public init() {}
+
+    /// What to type into a new tab for `program`, permission flag
+    /// included; nil for a plain shell.
+    public func command(for program: TabProgram) -> String? {
+        let base: String
+        switch program {
+        case .terminal: return nil
+        case .claude: base = claudeCommand
+        case .codex: base = codexCommand
+        }
+        let words = base.split(whereSeparator: \.isWhitespace)
+        let settled = words.contains { word in AgentPermission.ownArguments.contains { word == $0 || word.hasPrefix($0 + "=") } }
+        guard !settled, let flag = agentPermission.flag(for: program) else { return base }
+        return base + " " + flag
+    }
+
+    // Tolerate files written by older builds that lack newer fields.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = AppSettings()
+        fontName = try container.decodeIfPresent(String.self, forKey: .fontName) ?? defaults.fontName
+        fontSize = try container.decodeIfPresent(Double.self, forKey: .fontSize) ?? defaults.fontSize
+        workspaceRoot = try container.decodeIfPresent(String.self, forKey: .workspaceRoot) ?? defaults.workspaceRoot
+        branchPrefix = try container.decodeIfPresent(String.self, forKey: .branchPrefix) ?? defaults.branchPrefix
+        claudeCommand = try container.decodeIfPresent(String.self, forKey: .claudeCommand) ?? defaults.claudeCommand
+        codexCommand = try container.decodeIfPresent(String.self, forKey: .codexCommand) ?? defaults.codexCommand
+        newWorkspaceProgram = (try? container.decodeIfPresent(TabProgram.self, forKey: .newWorkspaceProgram)) ?? defaults.newWorkspaceProgram
+        agentPermission = (try? container.decodeIfPresent(AgentPermission.self, forKey: .agentPermission)) ?? defaults.agentPermission
+        trustWorkspaces = try container.decodeIfPresent(Bool.self, forKey: .trustWorkspaces) ?? defaults.trustWorkspaces
+        optionAsMeta = try container.decodeIfPresent(Bool.self, forKey: .optionAsMeta) ?? defaults.optionAsMeta
+        shellIntegration = try container.decodeIfPresent(Bool.self, forKey: .shellIntegration) ?? defaults.shellIntegration
+        cursorShape = (try? container.decodeIfPresent(TerminalSession.CursorShape.self, forKey: .cursorShape)) ?? defaults.cursorShape
+        cursorBlinks = try container.decodeIfPresent(Bool.self, forKey: .cursorBlinks) ?? defaults.cursorBlinks
+        scrollbackMB = try container.decodeIfPresent(Int.self, forKey: .scrollbackMB) ?? defaults.scrollbackMB
+        accent = (try? container.decodeIfPresent(AccentChoice.self, forKey: .accent)) ?? defaults.accent
+    }
+}
+
+/// A tab as the app remembers it between runs; its terminal is the host's.
+public struct SavedTab: Codable, Equatable {
+    public var id: UUID
+    public var workspace: UUID
+    /// The title the user gave it, if any.
+    public var title: String?
+    public var active = false
 }
 
 public struct AppState: Codable, Equatable {
@@ -52,6 +166,17 @@ public struct AppState: Codable, Equatable {
     public var settings = AppSettings()
     /// The workspace selected when the app last ran.
     public var lastSelection: UUID?
+    /// The sidebar's width as the user dragged it; nil for the default.
+    public var sidebarWidth: Double?
+    /// Projects folded in the sidebar to their name.
+    public var collapsedProjects: Set<UUID> = []
+    /// The tabs open when the app last ran, in order: the terminal host
+    /// keeps their programs running, and the app attaches to them again.
+    public var tabs: [SavedTab] = []
+    /// Tabs split into panes, by the tab the tab bar shows for each.
+    public var splits: [String: SplitNode] = [:]
+    /// Workspaces shown in windows of their own.
+    public var windows: [UUID] = []
 
     public init() {}
 
@@ -62,6 +187,11 @@ public struct AppState: Codable, Equatable {
         workspaces = try container.decodeIfPresent([Workspace].self, forKey: .workspaces) ?? []
         settings = try container.decodeIfPresent(AppSettings.self, forKey: .settings) ?? AppSettings()
         lastSelection = try container.decodeIfPresent(UUID.self, forKey: .lastSelection)
+        sidebarWidth = try container.decodeIfPresent(Double.self, forKey: .sidebarWidth)
+        collapsedProjects = try container.decodeIfPresent(Set<UUID>.self, forKey: .collapsedProjects) ?? []
+        tabs = try container.decodeIfPresent([SavedTab].self, forKey: .tabs) ?? []
+        splits = (try? container.decodeIfPresent([String: SplitNode].self, forKey: .splits)) ?? [:]
+        windows = try container.decodeIfPresent([UUID].self, forKey: .windows) ?? []
     }
 }
 

@@ -35,9 +35,9 @@ public enum Git {
     /// Runs git in `directory` and returns trimmed stdout. Throws with git's
     /// own error text when it exits non-zero or takes longer than `timeout`.
     @discardableResult
-    public static func run(_ arguments: [String], in directory: String, timeout: TimeInterval = 60) throws -> String {
+    public static func run(_ arguments: [String], in directory: String, timeout: TimeInterval = 60, using tool: URL? = nil) throws -> String {
         let process = Process()
-        process.executableURL = executable
+        process.executableURL = tool ?? executable
         process.arguments = arguments
         process.currentDirectoryURL = URL(fileURLWithPath: directory)
         var environment = ProcessInfo.processInfo.environment
@@ -88,6 +88,44 @@ public enum Git {
         }
         if let current = try? run(["branch", "--show-current"], in: repository), !current.isEmpty { return current }
         return "HEAD"
+    }
+
+    /// Lines added and removed since the last commit, new files counted in full.
+    public struct Changes: Equatable, Sendable {
+        public var added = 0
+        public var removed = 0
+        public var isEmpty: Bool { added == 0 && removed == 0 }
+    }
+
+    /// What changed in a checkout since its last commit; nil when it can't
+    /// tell (no commit yet, not a repository).
+    public static func changes(in checkout: String) -> Changes? {
+        guard let numstat = try? run(["diff", "HEAD", "--numstat"], in: checkout, timeout: 15),
+              let untracked = try? run(["ls-files", "--others", "--exclude-standard", "-z"], in: checkout, timeout: 15)
+        else { return nil }
+        var changes = Changes()
+        for line in numstat.split(separator: "\n") {
+            let fields = line.split(separator: "\t", maxSplits: 2)
+            guard fields.count == 3 else { continue }
+            changes.added += Int(fields[0]) ?? 0 // "-" for a binary file
+            changes.removed += Int(fields[1]) ?? 0
+        }
+        // New files count as all added, as `git diff` shows them once staged.
+        // ponytail: only the first 200 new text files under 1 MB are read.
+        for path in untracked.split(separator: "\0").prefix(200) {
+            let url = URL(fileURLWithPath: checkout).appendingPathComponent(String(path))
+            guard let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize, size <= 1 << 20,
+                  let data = try? Data(contentsOf: url), !data.prefix(8000).contains(0) else { continue }
+            changes.added += data.reduce(0) { $1 == 10 ? $0 + 1 : $0 } + (data.last.map { $0 == 10 ? 0 : 1 } ?? 0)
+        }
+        return changes
+    }
+
+    /// The branch a checkout is on, read from its HEAD; nil when detached.
+    public static func currentBranch(in checkout: String) -> String? {
+        guard let head = try? String(contentsOfFile: checkout + "/.git/HEAD", encoding: .utf8),
+              head.hasPrefix("ref: refs/heads/") else { return nil }
+        return head.dropFirst("ref: refs/heads/".count).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     public static func branches(in repository: String) -> [String] {
@@ -156,5 +194,68 @@ public enum Git {
 
     public static func deleteBranch(_ branch: String, in repository: String) throws {
         try run(["branch", "-D", branch], in: repository)
+    }
+}
+
+/// Pull requests on GitHub, through the `gh` command line when it is
+/// installed and signed in. Anything else (no gh, no GitHub remote, offline)
+/// just means no pull requests are shown.
+public enum GitHub {
+    public struct PullRequest: Equatable, Sendable {
+        public enum State: Sendable { case open, draft, merged, closed }
+        public enum Checks: Sendable { case none, pending, passing, failing }
+        public let number: Int
+        public let state: State
+        public let checks: Checks
+        public let url: URL
+    }
+
+    /// Apps started from Finder don't get the shell's PATH.
+    private static let executable: URL? = ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"]
+        .map { URL(fileURLWithPath: $0) }
+        .first { FileManager.default.isExecutableFile(atPath: $0.path) }
+
+    /// The newest pull request from each of the repository's own branches, by branch name.
+    public static func pullRequests(in repository: String) -> [String: PullRequest]? {
+        guard let gh = executable,
+              let output = try? Git.run(
+                  ["pr", "list", "--state", "all", "--limit", "100",
+                   "--json", "number,state,isDraft,url,headRefName,isCrossRepository,statusCheckRollup"],
+                  in: repository, timeout: 30, using: gh)
+        else { return nil }
+        return parse(Data(output.utf8))
+    }
+
+    static func parse(_ json: Data) -> [String: PullRequest]? {
+        guard let list = try? JSONSerialization.jsonObject(with: json) as? [[String: Any]] else { return nil }
+        var found: [String: PullRequest] = [:]
+        for item in list { // newest first
+            guard let branch = item["headRefName"] as? String, found[branch] == nil,
+                  item["isCrossRepository"] as? Bool != true, // a fork's branch of the same name isn't ours
+                  let number = item["number"] as? Int,
+                  let url = (item["url"] as? String).flatMap(URL.init(string:)) else { continue }
+            let state: PullRequest.State = switch item["state"] as? String {
+            case "MERGED": .merged
+            case "CLOSED": .closed
+            default: item["isDraft"] as? Bool == true ? .draft : .open
+            }
+            found[branch] = PullRequest(number: number, state: state, checks: checks(item["statusCheckRollup"] as? [[String: Any]] ?? []), url: url)
+        }
+        return found
+    }
+
+    /// One state for all of a pull request's checks: any failure fails them,
+    /// then any still running.
+    static func checks(_ rollup: [[String: Any]]) -> PullRequest.Checks {
+        guard !rollup.isEmpty else { return .none }
+        let failures: Set = ["FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE"]
+        var running = false
+        for check in rollup {
+            // Check runs have a conclusion once done; status contexts a state.
+            let result = (check["conclusion"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? check["state"] as? String ?? ""
+            if failures.contains(result) { return .failing }
+            if result.isEmpty || result == "PENDING" || result == "EXPECTED" { running = true }
+        }
+        return running ? .pending : .passing
     }
 }

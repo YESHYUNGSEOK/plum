@@ -63,14 +63,69 @@ final class NavigationTests: XCTestCase {
         XCTAssertEqual(model.selection, order[3])
     }
 
-    func testMovingWorkspacesKeepsTheMainCheckoutFirstAndIsSaved() {
+    func testMovingWorkspacesAndTheMainCheckoutIsSaved() {
         model.moveWorkspace(order[2], by: -1)
         XCTAssertEqual(model.workspaceOrder, [order[0], order[2], order[1], order[3]])
-        model.moveWorkspace(order[2], by: -1) // can't pass the main checkout
-        XCTAssertEqual(model.workspaceOrder, [order[0], order[2], order[1], order[3]])
-        model.moveWorkspace(order[1], by: 1) // already last in its project
-        XCTAssertEqual(model.workspaceOrder, [order[0], order[2], order[1], order[3]])
+        model.moveWorkspace(order[2], by: -1) // past the main checkout: it moves too
+        XCTAssertEqual(model.workspaceOrder, [order[2], order[0], order[1], order[3]])
+        model.moveWorkspace(order[2], by: -1) // already first in its project
+        model.moveWorkspace(order[1], by: 1) // already last
+        XCTAssertEqual(model.workspaceOrder, [order[2], order[0], order[1], order[3]])
+        model.moveWorkspace(order[0], by: 1) // the main checkout itself
+        XCTAssertEqual(model.workspaceOrder, [order[2], order[1], order[0], order[3]])
         XCTAssertEqual(AppModel(store: Store(directory: directory)).workspaceOrder, model.workspaceOrder)
+    }
+
+    /// A drag can carry a workspace past several others, over archived ones
+    /// and other projects' in the saved list.
+    func testMovingSeveralPlacesAtOnce() throws {
+        let a = Project(name: "alpha", path: "/nonexistent/alpha")
+        let b = Project(name: "beta", path: "/nonexistent/beta")
+        let names = ["one", "two", "three"]
+        var listed = names.map { Workspace(projectID: a.id, name: $0, branch: "x/\($0)", path: "/nonexistent/\($0)") }
+        var old = Workspace(projectID: a.id, name: "old", branch: "x/old", path: "/nonexistent/old")
+        old.isArchived = true
+        let other = Workspace(projectID: b.id, name: "other", branch: "x/other", path: "/nonexistent/other")
+        listed.insert(old, at: 1)
+        listed.insert(other, at: 3)
+        var state = AppState()
+        state.projects = [a, b]
+        state.workspaces = listed // one, old, two, other, three
+        try Store(directory: directory).save(state)
+        let model = AppModel(store: Store(directory: directory))
+        let rows = { model.workspaces(in: a).map { $0.id == a.id ? "main" : $0.name } }
+
+        model.moveWorkspace(listed[0].id, by: 2)
+        XCTAssertEqual(rows(), ["main", "two", "three", "one"])
+        model.moveWorkspace(listed[0].id, by: -2)
+        XCTAssertEqual(rows(), ["main", "one", "two", "three"])
+        model.moveWorkspace(listed[4].id, by: -3) // past the main checkout
+        XCTAssertEqual(rows(), ["three", "main", "one", "two"])
+        model.moveWorkspace(a.id, by: 2) // the main checkout, two down
+        XCTAssertEqual(rows(), ["three", "one", "two", "main"])
+        XCTAssertEqual(model.workspaces(in: a, archived: true).map(\.name), ["old"])
+        XCTAssertEqual(model.workspaces(in: b).map(\.name), ["main", "other"], "another project's order is its own")
+        let reloaded = AppModel(store: Store(directory: directory))
+        XCTAssertEqual(reloaded.workspaces(in: reloaded.state.projects[0]).map { $0.id == a.id ? "main" : $0.name }, rows())
+    }
+
+    func testRenamingChangesOnlyTheNameAndIsSaved() {
+        let one = order[1]
+        XCTAssertNil(model.renameWorkspace(one, to: "  first  "))
+        let renamed = model.state.workspaces.first { $0.id == one }
+        XCTAssertEqual(renamed?.name, "first", "trimmed")
+        XCTAssertEqual(renamed?.branch, "x/one", "the branch stays")
+        XCTAssertEqual(renamed?.path, "/nonexistent/one", "the folder stays")
+        XCTAssertNotNil(model.renameWorkspace(one, to: "two"), "another workspace of the project has that name")
+        XCTAssertNil(model.renameWorkspace(one, to: "   "), "blank: nothing happens")
+        XCTAssertNotNil(model.renameWorkspace(order[0], to: "first"), "the main checkout is checked against the rest too")
+        XCTAssertNil(model.renameWorkspace(order[0], to: "base"))
+        XCTAssertEqual(model.workspace(order[0])?.name, "base", "the main checkout can be renamed")
+        XCTAssertEqual(model.workspace(order[0])?.path, "/nonexistent/alpha")
+        XCTAssertNotNil(model.renameWorkspace(one, to: "base"))
+        let reloaded = AppModel(store: Store(directory: directory))
+        XCTAssertEqual(reloaded.workspace(one)?.name, "first")
+        XCTAssertEqual(reloaded.workspace(order[0])?.name, "base")
     }
 
     func testSwitcherPutsRecentFirstAndRanksMatches() {

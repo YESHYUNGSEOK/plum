@@ -7,6 +7,7 @@ public enum AppSheet: Identifiable {
     case settings
     case confirm(Confirmation)
     case switcher(SwitcherState)
+    case diff(Workspace)
 
     public var id: String {
         switch self {
@@ -15,6 +16,7 @@ public enum AppSheet: Identifiable {
         case .settings: "settings"
         case let .confirm(confirmation): "confirm-\(confirmation.id)"
         case .switcher: "switcher"
+        case let .diff(workspace): "diff-\(workspace.id)"
         }
     }
 }
@@ -50,7 +52,6 @@ public final class Confirmation {
     let id = UUID()
     let title: String
     let summary: String
-    let symbol: String
     let sections: [Section]
     let note: String?
     let action: String
@@ -59,10 +60,9 @@ public final class Confirmation {
     /// Told the answer once: true to go ahead.
     var onAnswer: ((Bool) -> Void)?
 
-    init(title: String, summary: String, symbol: String, sections: [Section] = [], note: String? = nil, action: String, destructive: Bool) {
+    init(title: String, summary: String, sections: [Section] = [], note: String? = nil, action: String, destructive: Bool) {
         self.title = title
         self.summary = summary
-        self.symbol = symbol
         self.sections = sections
         self.note = note
         self.action = action
@@ -100,6 +100,12 @@ public final class Confirmation {
 /// A dialog's content on Plum's dark card. The window controller places it
 /// over a dimmed window and animates it with Core Animation.
 struct DialogCard: View {
+    /// The app's window, for dialogs that grow with it. Not only while it
+    /// is the main window: an inactive app has none.
+    static var windowSize: CGSize {
+        (NSApp.mainWindow ?? NSApp.windows.first { $0.isVisible && $0.canBecomeMain })?.frame.size ?? CGSize(width: 1200, height: 800)
+    }
+
     let model: AppModel
     /// Held, not read from the model, so the card keeps its content while it fades out.
     let sheet: AppSheet?
@@ -109,9 +115,9 @@ struct DialogCard: View {
             content(sheet)
                 .background(Theme.card)
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.white.opacity(0.08)))
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.hairline))
                 .accessibilityAddTraits(.isModal)
-                .environment(\.colorScheme, .dark)
+                .id(model.state.settings.accent)
         }
     }
 
@@ -124,6 +130,7 @@ struct DialogCard: View {
         case .settings: SettingsSheet(model: model, settings: model.state.settings, close: close)
         case let .confirm(confirmation): ConfirmSheet(confirmation: confirmation, close: close)
         case let .switcher(state): WorkspaceSwitcher(model: model, state: state, close: close)
+        case let .diff(workspace): DiffSheet(model: model, workspace: workspace, close: close)
         }
     }
 }
@@ -243,7 +250,7 @@ struct WorkspaceSwitcher: View {
             StatusMark(status: model.status(of: entry.id))
             Text(entry.name)
                 .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(picked ? Color.white : Theme.rowText)
+                .foregroundStyle(picked ? Theme.strongText : Theme.rowText)
                 .lineLimit(1)
             Text(entry.branch.isEmpty ? entry.project : "\(entry.project) · \(entry.branch)")
                 .font(.system(size: 11.5, design: .monospaced))
@@ -296,7 +303,16 @@ struct NewWorkspaceSheet: View {
     @State private var defaultBase = ""
     @State private var error: String?
     @State private var checking = false
+    /// What the first tab starts; the last choice made here.
+    @State private var program: TabProgram
     @FocusState private var focus: Field?
+
+    init(model: AppModel, project: Project, close: @escaping () -> Void) {
+        self.model = model
+        self.project = project
+        self.close = close
+        _program = State(initialValue: model.state.settings.newWorkspaceProgram)
+    }
 
     private var suggestedBranch: String {
         WorkspaceNaming.branchName(for: name, prefix: model.state.settings.branchPrefix)
@@ -368,6 +384,11 @@ struct NewWorkspaceSheet: View {
                             .focused($focus, equals: .base)
                     }
                 }
+                OptionRow(symbol: "sparkles", label: "에이전트", focused: false) {
+                    ProgramPicker(program: $program)
+                        .padding(.leading, -8) // the choice's text lines up with the fields above
+                    Spacer(minLength: 0)
+                }
                 OptionRow(symbol: "folder", label: "위치", focused: false) {
                     Text(location)
                         .font(.system(size: 12, design: .monospaced))
@@ -429,7 +450,7 @@ struct NewWorkspaceSheet: View {
         guard canCreate else { return }
         let trimmedBase = base.trimmingCharacters(in: .whitespaces)
         let choice: WorkspaceService.BranchChoice = useExisting ? .existing : .new(base: trimmedBase.isEmpty ? nil : trimmedBase)
-        let (model, projectID, name, branch) = (model, project.id, name, chosenBranch)
+        let (model, projectID, name, branch, program) = (model, project.id, name, chosenBranch, program)
         checking = true
         error = nil
         Task {
@@ -440,7 +461,7 @@ struct NewWorkspaceSheet: View {
             }
             close()
             do {
-                try await model.createWorkspace(projectID: projectID, name: name, branch: branch, choice: choice)
+                try await model.createWorkspace(projectID: projectID, name: name, branch: branch, choice: choice, program: program)
             } catch {
                 model.errorMessage = error.localizedDescription
             }
@@ -472,7 +493,7 @@ private struct OptionRow<Content: View>: View {
         }
         .padding(.horizontal, 12)
         .frame(height: 38)
-        .background(RoundedRectangle(cornerRadius: 8).fill(focused ? Color(hex: 0x28282E) : .clear))
+        .background(RoundedRectangle(cornerRadius: 8).fill(focused ? Theme.focusRow : .clear))
         .animation(.easeOut(duration: 0.12), value: focused)
         .transition(.opacity)
     }
@@ -521,16 +542,9 @@ struct ProjectSettingsSheet: View {
                     .font(.system(size: 11.5))
                     .foregroundStyle(Theme.tertiary)
             }
-            PlumField(label: "준비 명령", text: $project.setupCommand, prompt: "예: pnpm install", mono: true)
-            VStack(alignment: .leading, spacing: 8) {
-                PlumField(
-                    label: "에이전트 명령", text: $project.agentCommand, prompt: "비워 두면 실행하지 않음", mono: true,
-                    hint: String(localized: "이 명령으로 실행한 Claude Code는 작업 중·입력 대기·완료 상태를 Plum에 알립니다."))
-                Button("Claude Code 명령 넣기") {
-                    project.agentCommand = "claude --settings \"$PLUM_CLAUDE_SETTINGS\""
-                }
-                .buttonStyle(PlumButtonStyle(kind: .secondary, height: 26))
-            }
+            PlumField(
+                label: "준비 명령", text: $project.setupCommand, prompt: "예: pnpm install", mono: true,
+                hint: String(localized: "새 워크스페이스의 첫 탭에서, 고른 에이전트보다 먼저 실행합니다."))
             HStack(spacing: 8) {
                 // Asks in a dialog of its own, which takes this one's place.
                 Button("목록에서 제거", role: .destructive) { AppActions.removeProject(model, project) }
@@ -575,8 +589,32 @@ struct SettingsSheet: View {
     }
 
     var body: some View {
+        // Whole when it fits; scrolling in a short window.
+        ViewThatFits(in: .vertical) {
+            form
+            ScrollView { form }.scrollBounceBehavior(.basedOnSize)
+        }
+        .frame(maxHeight: DialogCard.windowSize.height - 90)
+        .frame(width: 480)
+        .animation(Motion.settle, value: problem)
+        .onSubmit(save)
+        .onExitCommand(perform: close)
+        .task { fonts = await Task.detached { FontSpec.monospacedFamilies() }.value }
+    }
+
+    private var form: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("설정").font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.text)
+            SectionLabel("모양")
+            VStack(alignment: .leading, spacing: 6) {
+                Text("강조 색").font(.system(size: 12)).foregroundStyle(Theme.secondary)
+                HStack(spacing: 8) {
+                    ForEach(AccentChoice.allCases, id: \.self) { choice in
+                        AccentSwatch(choice: choice, selected: settings.accent == choice) { settings.accent = choice }
+                    }
+                }
+                .frame(height: 32)
+            }
             SectionLabel("터미널")
             HStack(alignment: .bottom, spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
@@ -624,13 +662,57 @@ struct SettingsSheet: View {
                 Text(verbatim: "가나다 한글 abc 0O 1lI ✓")
             }
             .font(previewFont)
-            .foregroundStyle(Color(hex: 0xDCDCE2))
+            .foregroundStyle(Theme.terminalText)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .background(RoundedRectangle(cornerRadius: 8).fill(Theme.panelColor))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(hex: 0x2A2A30)))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.divider))
             .accessibilityHidden(true)
+
+            HStack(alignment: .bottom, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("커서").font(.system(size: 12)).foregroundStyle(Theme.secondary)
+                    Picker("커서", selection: $settings.cursorShape) {
+                        Text("블록").tag(TerminalSession.CursorShape.block)
+                        Text("막대").tag(TerminalSession.CursorShape.bar)
+                        Text("밑줄").tag(TerminalSession.CursorShape.underline)
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(height: 32)
+                }
+                Toggle(isOn: $settings.cursorBlinks) {
+                    Text("깜빡임").font(.system(size: 12)).foregroundStyle(Theme.secondary)
+                }
+                .toggleStyle(.checkbox)
+                .frame(height: 32)
+                Spacer()
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("스크롤백(탭마다, MB)").font(.system(size: 12)).foregroundStyle(Theme.secondary)
+                    TextField("10", value: $settings.scrollbackMB, format: .number)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundStyle(Theme.text)
+                        .padding(.horizontal, 10)
+                        .frame(width: 90, height: 32)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Theme.well))
+                        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.fieldBorder))
+                        .accessibilityLabel("스크롤백 크기, 메가바이트")
+                }
+            }
+            Toggle(isOn: $settings.shellIntegration) {
+                Text("zsh 연동: 명령 사이를 ⌘↑ ⌘↓로 이동 (새 탭부터)")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.secondary)
+            }
+            .toggleStyle(.checkbox)
+            Toggle(isOn: $settings.optionAsMeta) {
+                Text("⌥를 Meta 키로 사용 (⌥B, ⌥. 같은 셸 단축키)")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.secondary)
+            }
+            .toggleStyle(.checkbox)
 
             SectionLabel("워크스페이스")
             HStack(alignment: .bottom, spacing: 8) {
@@ -641,6 +723,32 @@ struct SettingsSheet: View {
             PlumField(
                 label: "브랜치 접두사", text: $settings.branchPrefix, prompt: "예: dev/", mono: true,
                 hint: String(localized: "새 브랜치 이름 예: \(WorkspaceNaming.branchName(for: "release-notes", prefix: settings.branchPrefix))"))
+
+            SectionLabel("에이전트")
+            PlumField(
+                label: "Claude 명령", text: $settings.claudeCommand, prompt: LocalizedStringKey(AppSettings.defaultClaudeCommand), mono: true,
+                hint: String(localized: "--settings \"$PLUM_CLAUDE_SETTINGS\"를 붙이면 작업 중·입력 대기·완료 상태가 사이드바에 보입니다."))
+            PlumField(label: "Codex 명령", text: $settings.codexCommand, prompt: LocalizedStringKey(AppSettings.defaultCodexCommand), mono: true)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("권한").font(.system(size: 12)).foregroundStyle(Theme.secondary)
+                Picker("권한", selection: $settings.agentPermission) {
+                    Text("전체 허용").tag(AgentPermission.fullAccess)
+                    Text("자동 승인").tag(AgentPermission.auto)
+                    Text("에이전트 자체 설정").tag(AgentPermission.own)
+                }
+                .labelsHidden()
+                .frame(height: 32)
+                Text(permissionHint)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Toggle(isOn: $settings.trustWorkspaces) {
+                Text("에이전트를 열 폴더를 미리 신뢰한 폴더로 기록")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.secondary)
+            }
+            .toggleStyle(.checkbox)
             if let problem {
                 Text(problem)
                     .font(.system(size: 12))
@@ -661,11 +769,20 @@ struct SettingsSheet: View {
             }
         }
         .padding(22)
-        .frame(width: 480)
-        .animation(Motion.settle, value: problem)
-        .onSubmit(save)
-        .onExitCommand(perform: close)
-        .task { fonts = await Task.detached { FontSpec.monospacedFamilies() }.value }
+    }
+
+    /// What the choice adds to the commands, so it's never a surprise.
+    private var permissionHint: String {
+        let claude = settings.agentPermission.flag(for: .claude)
+        let codex = settings.agentPermission.flag(for: .codex)
+        switch settings.agentPermission {
+        case .fullAccess:
+            return String(localized: "묻지 않고 모든 명령을 실행합니다. Claude에 \(claude ?? ""), Codex에 \(codex ?? "")를 붙입니다.")
+        case .auto:
+            return String(localized: "안전한 작업은 에이전트가 스스로 승인하고 나머지는 묻습니다. Claude에 \(claude ?? ""), Codex에 \(codex ?? "")를 붙입니다.")
+        case .own:
+            return String(localized: "플래그를 붙이지 않고 각 에이전트의 권한 설정을 따릅니다.")
+        }
     }
 
     private func step(_ symbol: String, _ label: LocalizedStringKey, by delta: Double) -> some View {
@@ -696,6 +813,11 @@ struct SettingsSheet: View {
         settings.workspaceRoot = settings.workspaceRoot.trimmingCharacters(in: .whitespaces)
         if settings.workspaceRoot.isEmpty { settings.workspaceRoot = AppSettings().workspaceRoot }
         settings.branchPrefix = settings.branchPrefix.trimmingCharacters(in: .whitespaces)
+        // Emptied: back to the command that works out of the box.
+        settings.claudeCommand = settings.claudeCommand.trimmingCharacters(in: .whitespacesAndNewlines)
+        if settings.claudeCommand.isEmpty { settings.claudeCommand = AppSettings.defaultClaudeCommand }
+        settings.codexCommand = settings.codexCommand.trimmingCharacters(in: .whitespacesAndNewlines)
+        if settings.codexCommand.isEmpty { settings.codexCommand = AppSettings.defaultCodexCommand }
         // Relative to what? A relative location would follow whatever the
         // current directory happens to be.
         guard settings.workspaceRoot.hasPrefix("/") || settings.workspaceRoot.hasPrefix("~") else {
@@ -718,22 +840,13 @@ struct ConfirmSheet: View {
     let close: () -> Void
 
     var body: some View {
-        let tint = confirmation.destructive ? Theme.danger : Theme.waiting
         VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .top, spacing: 14) {
-                Image(systemName: confirmation.symbol)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(tint)
-                    .frame(width: 36, height: 36)
-                    .background(RoundedRectangle(cornerRadius: 10).fill(tint.opacity(0.14)))
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(confirmation.title).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.text)
-                    Text(confirmation.summary)
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(Theme.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(confirmation.title).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.text)
+                Text(confirmation.summary)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(Theme.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             ForEach(Array(confirmation.sections.enumerated()), id: \.offset) { _, section in
                 LineList(section: section)
@@ -820,5 +933,38 @@ private struct LineList: View {
             .padding(.vertical, 9)
             .background(RoundedRectangle(cornerRadius: 8).fill(Theme.well))
         }
+    }
+}
+
+/// One accent color to pick: a dot, ringed when it's the one chosen.
+private struct AccentSwatch: View {
+    let choice: AccentChoice
+    let selected: Bool
+    let pick: () -> Void
+
+    private var name: LocalizedStringKey {
+        switch choice {
+        case .plum: "자두"
+        case .blue: "파랑"
+        case .green: "초록"
+        case .orange: "주황"
+        case .pink: "분홍"
+        case .graphite: "흑연"
+        }
+    }
+
+    var body: some View {
+        Button(action: pick) {
+            Circle()
+                .fill(Color(nsColor: choice.color))
+                .frame(width: 18, height: 18)
+                .padding(3)
+                .overlay(Circle().strokeBorder(selected ? Theme.text : .clear, lineWidth: 1.5))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help(Text(name))
+        .accessibilityLabel(Text(name))
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

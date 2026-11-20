@@ -1,20 +1,53 @@
 import Foundation
 
-/// One line from an agent hook: `<tab id> <state> [message]`.
+/// One line from an agent hook: `<tab id> <state> [message]`, or
+/// `<tab id> stop <json>` with what Claude Code's Stop hook was given.
 public enum StatusMessage {
     public static func parse(_ line: String) -> (tab: UUID, status: AgentStatus, message: String)? {
         let parts = line.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: " ", maxSplits: 2).map(String.init)
-        guard parts.count >= 2, let tab = UUID(uuidString: parts[0]), let status = AgentStatus(rawValue: parts[1]) else { return nil }
+        guard parts.count >= 2, let tab = UUID(uuidString: parts[0]) else { return nil }
+        if parts[1] == "stop" {
+            let (status, message) = afterStop(parts.count > 2 ? parts[2] : "")
+            return (tab, status, sanitizeForDisplay(message, limit: 200))
+        }
+        guard let status = AgentStatus(rawValue: parts[1]) else { return nil }
         return (tab, status, sanitizeForDisplay(parts.count > 2 ? parts[2] : "", limit: 200))
+    }
+
+    /// The turn is over. Done, unless Claude Code still has work in flight
+    /// that will wake it: a subagent means it is still working; a command,
+    /// a monitor, a workflow or a scheduled wakeup means it is monitoring.
+    /// The final answer comes along, for the notification.
+    static func afterStop(_ json: String) -> (AgentStatus, String) {
+        guard let input = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any] else { return (.done, "") }
+        let message = input["last_assistant_message"] as? String ?? ""
+        let ended: Set = ["idle", "done", "success", "succeeded", "complete", "completed", "finished", "failed", "error",
+                          "terminated", "exited", "aborted", "expired", "skipped", "crashed", "killed", "cancelled", "canceled", "timed_out"]
+        let running = (input["background_tasks"] as? [[String: Any]] ?? []).filter {
+            !ended.contains(($0["status"] as? String ?? "").lowercased())
+        }
+        if running.contains(where: { ["subagent", "teammate"].contains(($0["type"] as? String ?? "").lowercased()) }) {
+            return (.working, message)
+        }
+        if !running.isEmpty || !(input["session_crons"] as? [Any] ?? []).isEmpty { return (.monitoring, message) }
+        return (.done, message)
     }
 }
 
 /// The settings file handed to Claude Code with `--settings`, so its hooks
 /// report to Plum without touching the user's own configuration.
 public enum HookSettings {
+    /// The Stop hook hands over what it was given (one line of JSON) and
+    /// lets Plum tell "done" from "waiting for background work".
+    static let stopCommand = #"[ -n "$PLUM_TAB_ID" ] && { input=$(tr -d '\n'); for socket in "$PLUM_SOCKET" "$PLUM_HOST_SOCKET"; do [ -S "$socket" ] && printf '%s stop %s\n' "$PLUM_TAB_ID" "$input" | /usr/bin/nc -w 1 -U "$socket" >/dev/null 2>&1; done; }; true"#
+
     static func command(_ state: String) -> String {
         // Outside Plum the variables are unset and the hook does nothing.
-        "[ -n \"$PLUM_TAB_ID\" ] && [ -S \"$PLUM_SOCKET\" ] && printf '%s \(state)\\n' \"$PLUM_TAB_ID\" | /usr/bin/nc -w 1 -U \"$PLUM_SOCKET\" >/dev/null 2>&1; true"
+        // The terminal host hears it too, and keeps it for a Plum that
+        // isn't running now.
+        ["PLUM_SOCKET", "PLUM_HOST_SOCKET"].map { socket in
+            "[ -n \"$PLUM_TAB_ID\" ] && [ -S \"$\(socket)\" ] && printf '%s \(state)\\n' \"$PLUM_TAB_ID\" | /usr/bin/nc -w 1 -U \"$\(socket)\" >/dev/null 2>&1"
+        }.joined(separator: "; ") + "; true"
     }
 
     public static func claudeSettings() -> Data {
@@ -29,7 +62,7 @@ public enum HookSettings {
             "PostToolUse": group("working"),
             "PostToolUseFailure": group("working"),
             "Notification": group("waiting", matcher: "permission_prompt|elicitation_dialog|agent_needs_input"),
-            "Stop": group("done"),
+            "Stop": [["hooks": [["type": "command", "command": stopCommand]]]],
             "StopFailure": group("done"),
             "SessionEnd": group("idle"),
         ]]
@@ -115,7 +148,8 @@ public final class StatusServer {
 
         var data = Data()
         var buffer = [UInt8](repeating: 0, count: 4096)
-        while data.count < 64 * 1024, !data.contains(0x0A) {
+        // A Stop hook's line carries Claude's last answer: allow for a long one.
+        while data.count < 1 << 20, !data.contains(0x0A) {
             let n = read(client, &buffer, buffer.count)
             guard n > 0 else { break }
             data.append(buffer, count: n)

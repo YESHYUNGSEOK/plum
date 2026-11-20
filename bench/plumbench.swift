@@ -56,14 +56,19 @@ func childCount(_ pid: pid_t) -> Int {
 }
 
 /// Asked through Accessibility: NSWorkspace only updates its answer while a
-/// run loop is spinning, which a command-line tool does not have.
+/// run loop is spinning, which a command-line tool does not have. Electron
+/// apps (Orca) often don't answer that question (kAXErrorCannotComplete);
+/// then the owner of the frontmost ordinary window is the answer.
 func frontmostPID() -> pid_t {
     var focused: CFTypeRef?
-    guard AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute as CFString, &focused) == .success,
-          let element = focused, CFGetTypeID(element) == AXUIElementGetTypeID() else { return 0 }
-    var pid: pid_t = 0
-    AXUIElementGetPid(element as! AXUIElement, &pid)
-    return pid
+    if AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute as CFString, &focused) == .success,
+       let element = focused, CFGetTypeID(element) == AXUIElementGetTypeID() {
+        var pid: pid_t = 0
+        AXUIElementGetPid(element as! AXUIElement, &pid)
+        return pid
+    }
+    let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+    return windows.first { ($0[kCGWindowLayer as String] as? Int) == 0 }?[kCGWindowOwnerPID as String] as? pid_t ?? 0
 }
 
 func activate(_ pid: pid_t) -> Bool {

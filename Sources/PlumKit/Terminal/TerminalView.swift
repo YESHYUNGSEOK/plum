@@ -48,7 +48,7 @@ public final class TerminalView: NSView, NSTextInputClient {
     private var scrollRemainder: CGFloat = 0
     private var selectionAnchor: (Int, Int)?
 
-    public init(fontName: String, fontSize: Double, theme: TerminalTheme = .init()) {
+    public init(fontName: String, fontSize: Double, theme: TerminalTheme = .current) {
         self.fontName = fontName
         self.fontSize = fontSize
         scale = Double(NSScreen.main?.backingScaleFactor ?? 2)
@@ -57,6 +57,7 @@ public final class TerminalView: NSView, NSTextInputClient {
         super.init(frame: NSRect(x: 0, y: 0, width: 800, height: 500))
         wantsLayer = true
         layerContentsRedrawPolicy = .duringViewResize
+        registerForDraggedTypes([.fileURL, .string])
     }
 
     @available(*, unavailable)
@@ -85,7 +86,7 @@ public final class TerminalView: NSView, NSTextInputClient {
         // nothing tears.
         layer.displaySyncEnabled = false
         // Shown until the first frame, which waits for the window to be visible.
-        let bg = TerminalTheme().background
+        let bg = TerminalTheme.current.background
         layer.backgroundColor = CGColor(
             srgbRed: CGFloat(bg.0) / 255, green: CGFloat(bg.1) / 255, blue: CGFloat(bg.2) / 255, alpha: 1)
         return layer
@@ -138,6 +139,15 @@ public final class TerminalView: NSView, NSTextInputClient {
         DispatchQueue.main.async { [weak self] in
             if self?.needsDraw == true { self?.requestFrame() }
         }
+    }
+
+    /// New colors: the appearance or the accent changed.
+    public func setTheme(_ theme: TerminalTheme) {
+        renderer.theme = theme
+        renderer.needsFullRebuild = true
+        let bg = theme.background
+        metalLayer?.backgroundColor = CGColor(srgbRed: CGFloat(bg.0) / 255, green: CGFloat(bg.1) / 255, blue: CGFloat(bg.2) / 255, alpha: 1)
+        requestFrame()
     }
 
     public func setFont(name: String, size: Double) {
@@ -261,7 +271,11 @@ public final class TerminalView: NSView, NSTextInputClient {
 
     override public var acceptsFirstResponder: Bool { true }
 
+    /// It took the keyboard (a click in a pane of a split).
+    public var onFocus: ((TerminalSession) -> Void)?
+
     override public func becomeFirstResponder() -> Bool {
+        if let session { onFocus?(session) }
         setFocused(window?.isKeyWindow ?? false)
         return true
     }
@@ -317,6 +331,27 @@ public final class TerminalView: NSView, NSTextInputClient {
             }
         }
         if flags.contains(.command) { return } // unclaimed ⌘ shortcuts are not terminal input
+
+        // Shift+Return is a new line in Claude Code and Codex. Programs on
+        // the Kitty keyboard protocol tell it from Return themselves; for
+        // the rest it would be a plain Return, so it goes as Esc Return,
+        // which they (and zsh) take as "new line, don't send".
+        if event.keyCode == 0x24, flags.subtracting(.numericPad) == .shift, markedText.isEmpty, !session.usesKittyKeyboard {
+            return sendRaw("\u{1b}\r")
+        }
+        // ⌥ as Meta: the key goes as itself with Alt held, not as the
+        // symbol macOS would type.
+        if TerminalSession.optionAsMeta, flags.contains(.option), !flags.contains(.control), markedText.isEmpty,
+           let plain = KeyMap.asciiCharacters(keyCode: event.keyCode, shift: flags.contains(.shift)),
+           let scalar = plain.unicodeScalars.first, scalar.value >= 0x20, scalar.value != 0x7F, !(0xF700...0xF8FF).contains(scalar.value) {
+            var key = TerminalSession.Key(key: KeyMap.key(forKeyCode: event.keyCode))
+            key.action = event.isARepeat ? GHOSTTY_KEY_ACTION_REPEAT : GHOSTTY_KEY_ACTION_PRESS
+            key.mods = KeyMap.mods(flags)
+            key.unshiftedCodepoint = KeyMap.asciiCharacters(keyCode: event.keyCode, shift: false)?.unicodeScalars.first?.value ?? 0
+            key.text = plain
+            key.consumedMods = key.mods & (1 << 0) // shift shaped the text; Alt is still held
+            return send(key)
+        }
 
         let wasComposing = !markedText.isEmpty
         keyTextAccumulator = []
@@ -437,21 +472,50 @@ public final class TerminalView: NSView, NSTextInputClient {
     // MARK: Mouse
 
     private func cell(at event: NSEvent) -> (Int, Int) {
-        let point = convert(event.locationInWindow, from: nil)
+        cell(atViewPoint: convert(event.locationInWindow, from: nil))
+    }
+
+    private func cell(atViewPoint point: NSPoint) -> (Int, Int) {
         let m = renderer.metrics
         let column = Int((point.x * scale - Double(renderer.padding)) / Double(m.cellWidth))
         let row = Int((point.y * scale - Double(renderer.padding)) / Double(m.cellHeight))
         return (max(0, min(column, Int(session?.cols ?? 1) - 1)), max(0, min(row, Int(session?.rows ?? 1) - 1)))
     }
 
+    /// Tells the program about a mouse event if it asked to hear of them.
+    /// Shift keeps the mouse for Plum (selecting), as in other terminals.
+    /// True means the event is the program's, whether or not it wanted
+    /// this particular one.
+    private func report(_ event: NSEvent, _ action: GhosttyMouseAction, _ button: GhosttyMouseButton?) -> Bool {
+        guard let session, !event.modifierFlags.contains(.shift), session.wantsMouse else { return false }
+        let point = convert(event.locationInWindow, from: nil)
+        var mouse = TerminalSession.Mouse(action: action, button: button, x: Float(point.x * scale), y: Float(point.y * scale))
+        mouse.mods = KeyMap.mods(event.modifierFlags.intersection(.deviceIndependentFlagsMask))
+        mouse.anyButtonPressed = NSEvent.pressedMouseButtons != 0
+        session.send(
+            mouse, viewWidth: UInt32(bounds.width * scale), viewHeight: UInt32(bounds.height * scale),
+            padding: UInt32(renderer.padding))
+        return true
+    }
+
+    /// The press went to the program, so its drag and release do too.
+    private var programHasMouse = false
+
     override public func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
         guard let session else { return }
+        programHasMouse = !event.modifierFlags.contains(.command) && report(event, GHOSTTY_MOUSE_ACTION_PRESS, GHOSTTY_MOUSE_BUTTON_LEFT)
+        if programHasMouse { return }
         let cell = cell(at: event)
-        // ⌘-click opens a web link, as in other macOS terminals.
-        if event.modifierFlags.contains(.command), event.clickCount == 1,
-           let line = session.line(at: cell), let url = webLink(in: line.text, at: line.offset) {
-            TerminalView.openLink(url)
+        // ⌘-click opens a link, as in other macOS terminals.
+        if event.modifierFlags.contains(.command), event.clickCount == 1, let url = link(at: cell) {
+            if url.isFileURL {
+                // A file a program linked to is shown, never opened: opening
+                // could run it.
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            } else {
+                TerminalView.openLink(url)
+            }
             return
         }
         switch event.clickCount {
@@ -464,7 +528,56 @@ public final class TerminalView: NSView, NSTextInputClient {
         selectionChanged()
     }
 
+    /// The link at a cell: a program's own (OSC 8), else a web address in
+    /// the text. Only web pages and files.
+    private func link(at cell: (Int, Int)) -> URL? {
+        guard let session else { return nil }
+        if let address = session.hyperlink(at: cell), let url = URL(string: address),
+           ["http", "https", "file"].contains(url.scheme?.lowercased() ?? "") {
+            return url
+        }
+        guard let line = session.line(at: cell) else { return nil }
+        return webLink(in: line.text, at: line.offset)
+    }
+
+    // A pointing hand over a link while ⌘ is down, the I-beam otherwise.
+    override public func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas { removeTrackingArea(area) }
+        addTrackingArea(NSTrackingArea(
+            rect: .zero, options: [.mouseMoved, .cursorUpdate, .activeInKeyWindow, .inVisibleRect], owner: self))
+    }
+
+    override public func cursorUpdate(with event: NSEvent) { updatePointer(event) }
+
+    override public func mouseMoved(with event: NSEvent) {
+        // Programs that follow every move (mode 1003) are told; the encoder
+        // drops it for those that don't.
+        _ = report(event, GHOSTTY_MOUSE_ACTION_MOTION, nil)
+        updatePointer(event)
+    }
+
+    override public func flagsChanged(with event: NSEvent) {
+        super.flagsChanged(with: event)
+        updatePointer(event)
+    }
+
+    private func updatePointer(_ event: NSEvent) {
+        guard let window else { return }
+        let inside = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        guard bounds.contains(inside) else { return }
+        let overLink = event.modifierFlags.contains(.command) && link(at: cell(atViewPoint: inside)) != nil
+        (overLink ? NSCursor.pointingHand : NSCursor.iBeam).set()
+    }
+
+    /// ⌘↑ and ⌘↓: the view jumps to the previous or next command's prompt.
+    public func scrollToPrompt(_ delta: Int) {
+        session?.scrollToPrompt(delta)
+        requestFrame()
+    }
+
     override public func mouseDragged(with event: NSEvent) {
+        if programHasMouse { _ = report(event, GHOSTTY_MOUSE_ACTION_MOTION, GHOSTTY_MOUSE_BUTTON_LEFT); return }
         // ponytail: the anchor is a viewport cell, so it drifts if output
         // scrolls mid-drag. Track it in screen coordinates if that bites.
         guard let anchor = selectionAnchor else { return }
@@ -473,7 +586,91 @@ public final class TerminalView: NSView, NSTextInputClient {
     }
 
     override public func mouseUp(with event: NSEvent) {
+        if programHasMouse {
+            programHasMouse = false
+            _ = report(event, GHOSTTY_MOUSE_ACTION_RELEASE, GHOSTTY_MOUSE_BUTTON_LEFT)
+            return
+        }
         selectionAnchor = nil
+    }
+
+    /// ⌘F in the menu and "찾기…" here both open the find bar.
+    public var onFind: (() -> Void)?
+    /// "오른쪽으로 나누기" and "아래로 나누기" here.
+    public var onSplit: ((SplitNode.Axis) -> Void)?
+
+    override public func rightMouseDown(with event: NSEvent) {
+        if report(event, GHOSTTY_MOUSE_ACTION_PRESS, GHOSTTY_MOUSE_BUTTON_RIGHT) { return }
+        guard let window, let session else { return }
+        window.makeFirstResponder(self)
+        let items: [DropdownItem] = [
+            .command(String(localized: "복사"), symbol: "doc.on.doc", enabled: session.selectedText() != nil) { [weak self] in self?.copy(nil) },
+            .command(String(localized: "붙여넣기"), symbol: "doc.on.clipboard") { [weak self] in self?.paste(nil) },
+            .command(String(localized: "전체 선택"), symbol: "selection.pin.in.out") { [weak self] in self?.selectAll(nil) },
+            .separator(),
+            .command(String(localized: "찾기…"), symbol: "magnifyingglass") { [weak self] in self?.onFind?() },
+            .command(String(localized: "화면 지우기"), symbol: "eraser") { [weak self] in self?.clear() },
+            .separator(),
+            .command(String(localized: "오른쪽으로 나누기"), symbol: "rectangle.split.2x1") { [weak self] in self?.onSplit?(.horizontal) },
+            .command(String(localized: "아래로 나누기"), symbol: "rectangle.split.1x2") { [weak self] in self?.onSplit?(.vertical) },
+        ]
+        DropdownPanel.showMenu(items, at: window.convertPoint(toScreen: event.locationInWindow), in: window)
+    }
+
+    override public func rightMouseUp(with event: NSEvent) {
+        _ = report(event, GHOSTTY_MOUSE_ACTION_RELEASE, GHOSTTY_MOUSE_BUTTON_RIGHT)
+    }
+
+    override public func otherMouseDown(with event: NSEvent) {
+        _ = report(event, GHOSTTY_MOUSE_ACTION_PRESS, GHOSTTY_MOUSE_BUTTON_MIDDLE)
+    }
+
+    override public func otherMouseUp(with event: NSEvent) {
+        _ = report(event, GHOSTTY_MOUSE_ACTION_RELEASE, GHOSTTY_MOUSE_BUTTON_MIDDLE)
+    }
+
+    override public func selectAll(_ sender: Any?) {
+        session?.selectAll()
+        selectionChanged()
+    }
+
+    /// ⌘K.
+    public func clear() {
+        session?.clear()
+        selectionChanged()
+    }
+
+    // MARK: Dropped files
+
+    override public func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        session == nil ? [] : .copy
+    }
+
+    /// A file dropped on the terminal types its path, quoted for the
+    /// shell; dropped text is pasted.
+    override public func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let board = sender.draggingPasteboard
+        let files = (board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+        let text = files.isEmpty
+            ? board.string(forType: .string) ?? ""
+            : files.map { Self.shellQuoted($0.path) }.joined(separator: " ") + " "
+        guard !text.isEmpty else { return false }
+        NSApp.activate(ignoringOtherApps: true)
+        window?.makeFirstResponder(self)
+        insert(text)
+        return true
+    }
+
+    /// A path as the shell reads it back: everything that isn't plainly
+    /// safe gets a backslash, as Terminal does for dropped files.
+    static func shellQuoted(_ path: String) -> String {
+        var quoted = ""
+        for scalar in path.unicodeScalars {
+            let safe = scalar.value > 0x7F || CharacterSet.alphanumerics.contains(scalar) || "_./-+:@%,=".unicodeScalars.contains(scalar)
+            if !safe { quoted.append("\\") }
+            quoted.unicodeScalars.append(scalar)
+        }
+        return quoted
     }
 
     func selectionChanged() {
@@ -487,10 +684,24 @@ public final class TerminalView: NSView, NSTextInputClient {
             ? event.scrollingDeltaY / cellPoints
             : event.scrollingDeltaY
         let rows = Int(scrollRemainder.rounded(.towardZero))
-        guard rows != 0 else { return }
+        guard rows != 0, let session else { return }
         scrollRemainder -= CGFloat(rows)
-        session?.scroll(byRows: -rows) // wheel up shows older lines
-        requestFrame()
+        let up = rows > 0
+        if !event.modifierFlags.contains(.shift), session.wantsMouse {
+            // The program scrolls itself (vim, tmux, htop): wheel buttons 4 and 5.
+            for _ in 0..<min(abs(rows), 20) {
+                _ = report(event, GHOSTTY_MOUSE_ACTION_PRESS, up ? GHOSTTY_MOUSE_BUTTON_FOUR : GHOSTTY_MOUSE_BUTTON_FIVE)
+            }
+        } else if session.isAlternateScreen {
+            // A full-screen program that doesn't follow the mouse (less,
+            // git's pager, man): the wheel presses ↑ and ↓ for it.
+            for _ in 0..<min(abs(rows), 20) {
+                session.send(TerminalSession.Key(key: up ? GHOSTTY_KEY_ARROW_UP : GHOSTTY_KEY_ARROW_DOWN))
+            }
+        } else {
+            session.scroll(byRows: -rows) // wheel up shows older lines
+            requestFrame()
+        }
     }
 
     // MARK: Links
@@ -547,7 +758,12 @@ public final class TerminalView: NSView, NSTextInputClient {
     public var confirmPaste: ((String, @escaping (Bool) -> Void) -> Void)?
 
     @objc public func paste(_ sender: Any?) {
-        guard let session, let text = TerminalView.pasteboard.string(forType: .string), !text.isEmpty else { return }
+        guard let text = TerminalView.pasteboard.string(forType: .string) else { return }
+        insert(text)
+    }
+
+    private func insert(_ text: String) {
+        guard let session, !text.isEmpty else { return }
         guard session.paste(text) == .needsConfirmation else { return didInput() }
         confirmPaste?(text) { [weak self] confirmed in
             guard confirmed else { return }

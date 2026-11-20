@@ -43,6 +43,13 @@ def ratio(a, b):
     return f"{statistics.median(a) / statistics.median(b):.2f}×"
 
 
+NAMES = {"plum": "Plum", "ghostty": "Ghostty", "orca": "Orca"}
+
+
+def apps_in(table):
+    return [app for app in NAMES if any(r["app"] == app for r in table)]
+
+
 out = []
 env = os.path.join(folder, "env.txt")
 if os.path.exists(env):
@@ -54,22 +61,26 @@ launch = [r for r in rows("launch") if r["run"] != "0"]
 if launch:
     dropped = sum(1 for r in launch if r["valid"] != "yes")
     launch = [r for r in launch if r["valid"] == "yes"]
-    out += ["## 실행 시간 (ms)", "", "| 구간 | Plum | Ghostty | Ghostty ÷ Plum |", "|---|---|---|---|"]
+    apps = apps_in(launch)
+    out += ["## 실행 시간 (ms)", "", "| 구간 | " + " | ".join(NAMES[a] for a in apps) + " |", "|---|" + "---|" * len(apps)]
     for key, label in (("window_ms", "실행 요청 → 창이 화면에 뜸"), ("child_ms", "실행 요청 → 셸 프로세스 시작")):
-        plum = [float(r[key]) for r in launch if r["app"] == "plum"]
-        ghostty = [float(r[key]) for r in launch if r["app"] == "ghostty"]
-        out.append(f"| {label} | {describe(plum, 0)} | {describe(ghostty, 0)} | {ratio(ghostty, plum)} |")
+        cells = [describe([float(r[key]) for r in launch if r["app"] == a and r[key]], 0) for a in apps]
+        out.append(f"| {label} | " + " | ".join(cells) + " |")
     out += ["", f"제외한 표본: {dropped}개 (창이 화면에 보이지 않음).", ""]
 
 throughput = [r for r in rows("throughput") if r["run"] != "0"]
 if throughput:
     dropped = sum(1 for r in throughput if r["valid"] != "yes")
     throughput = [r for r in throughput if r["valid"] == "yes"]
-    out += ["## 출력 처리 속도 (MB/s, 클수록 빠름)", "", "| 데이터 | Plum | Ghostty | Plum ÷ Ghostty |", "|---|---|---|---|"]
+    apps = apps_in(throughput)
+    others = [a for a in apps if a != "plum"]
+    out += ["## 출력 처리 속도 (MB/s, 클수록 빠름)", "",
+            "| 데이터 | " + " | ".join(NAMES[a] for a in apps) + " | " + " | ".join(f"Plum ÷ {NAMES[a]}" for a in others) + " |",
+            "|---|" + "---|" * (len(apps) + len(others))]
     for dataset in dict.fromkeys(r["dataset"] for r in throughput):
-        plum = [float(r["mb_per_s"]) for r in throughput if r["dataset"] == dataset and r["app"] == "plum"]
-        ghostty = [float(r["mb_per_s"]) for r in throughput if r["dataset"] == dataset and r["app"] == "ghostty"]
-        out.append(f"| {dataset} | {describe(plum, 0)} | {describe(ghostty, 0)} | {ratio(plum, ghostty)} |")
+        speed = {a: [float(r["mb_per_s"]) for r in throughput if r["dataset"] == dataset and r["app"] == a] for a in apps}
+        out.append(f"| {dataset} | " + " | ".join(describe(speed[a], 0) for a in apps) + " | "
+                   + " | ".join(ratio(speed["plum"], speed[a]) for a in others) + " |")
     out += ["", f"제외한 표본: {dropped}개 (측정 중 다른 앱이 앞에 있었음).", ""]
 
 for name, title in (("latency", "키 입력 → 화면 표시 지연, 연속 입력 (ms, 작을수록 빠름)"),
@@ -77,19 +88,18 @@ for name, title in (("latency", "키 입력 → 화면 표시 지연, 연속 입
     latency = rows(name)
     if not latency:
         continue
-    out += [f"## {title}", "",
-            "| | Plum | Ghostty |", "|---|---|---|"]
-    values = {app: sorted(float(r["latency_ms"]) for r in latency if r["app"] == app) for app in ("plum", "ghostty")}
-    out.append(f"| 중앙값 [사분위] (범위) | {describe(values['plum'])} | {describe(values['ghostty'])} |")
+    apps = apps_in(latency)
+    out += [f"## {title}", "", "| | " + " | ".join(NAMES[a] for a in apps) + " |", "|---|" + "---|" * len(apps)]
+    values = {app: sorted(float(r["latency_ms"]) for r in latency if r["app"] == app) for app in apps}
+    out.append("| 중앙값 [사분위] (범위) | " + " | ".join(describe(values[a]) for a in apps) + " |")
     for label, pick in (("평균", statistics.mean), ("95번째 백분위", lambda v: v[int(len(v) * 0.95) - 1])):
-        cells = [f"{pick(values[app]):.1f}" if values[app] else "—" for app in ("plum", "ghostty")]
-        out.append(f"| {label} | {cells[0]} | {cells[1]} |")
+        out.append(f"| {label} | " + " | ".join(f"{pick(values[a]):.1f}" if values[a] else "—" for a in apps) + " |")
     out.append("")
     # Per block, to show whether the difference holds each time or only on average.
     blocks = sorted({int(r["block"]) for r in latency})
     out += ["블록별 중앙값 (두 앱을 번갈아 측정):", "", "| 블록 | " + " | ".join(str(b) for b in blocks) + " |",
             "|---|" + "---|" * len(blocks)]
-    for app in ("plum", "ghostty"):
+    for app in apps:
         cells = []
         for block in blocks:
             v = [float(r["latency_ms"]) for r in latency if r["app"] == app and int(r["block"]) == block]
@@ -112,10 +122,11 @@ if memory:
 
 tabs = rows("tabs")
 if tabs:
-    out += ["## 터미널 10개", "", "| 항목 | Plum | Ghostty |", "|---|---|---|"]
+    apps = apps_in(tabs)
+    out += ["## 터미널 10개", "", "| 항목 | " + " | ".join(NAMES[a] for a in apps) + " |", "|---|" + "---|" * len(apps)]
     for key, label in (("fp_1_mb", "터미널 1개일 때 (MB)"), ("fp_10_mb", "터미널 10개일 때 (MB)")):
-        cells = [describe([float(r[key]) for r in tabs if r["app"] == app and r["terminals"] == "10"]) for app in ("plum", "ghostty")]
-        out.append(f"| {label} | {cells[0]} | {cells[1]} |")
+        cells = [describe([float(r[key]) for r in tabs if r["app"] == app and r["terminals"] == "10"]) for app in apps]
+        out.append(f"| {label} | " + " | ".join(cells) + " |")
     wrong = [f"{r['app']} {r['terminals']}개" for r in tabs if r["terminals"] != "10"]
     out += ["", "터미널이 10개가 아니었던 실행(제외): " + (", ".join(wrong) if wrong else "없음") + ".", ""]
 

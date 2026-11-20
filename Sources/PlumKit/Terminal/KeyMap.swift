@@ -52,3 +52,27 @@ enum KeyMap {
         0x7C: GHOSTTY_KEY_ARROW_RIGHT, 0x7D: GHOSTTY_KEY_ARROW_DOWN, 0x7E: GHOSTTY_KEY_ARROW_UP,
     ]
 }
+
+import Carbon
+
+extension KeyMap {
+    /// What a key types on the English-style layout the user has (US,
+    /// ABC…), whatever input method is on: ⌥B as Meta is Esc b even while
+    /// typing Korean.
+    static func asciiCharacters(keyCode: UInt16, shift: Bool) -> String? {
+        guard let source = TISCopyCurrentASCIICapableKeyboardLayoutInputSource()?.takeRetainedValue(),
+              let property = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else { return nil }
+        let data = Unmanaged<CFData>.fromOpaque(property).takeUnretainedValue() as Data
+        var deadKeys: UInt32 = 0
+        var length = 0
+        var characters = [UniChar](repeating: 0, count: 4)
+        let status = data.withUnsafeBytes { layout -> OSStatus in
+            guard let base = layout.baseAddress?.assumingMemoryBound(to: UCKeyboardLayout.self) else { return -1 }
+            return UCKeyTranslate(
+                base, keyCode, UInt16(kUCKeyActionDown), shift ? UInt32(shiftKey >> 8) & 0xFF : 0,
+                UInt32(LMGetKbdType()), OptionBits(kUCKeyTranslateNoDeadKeysBit), &deadKeys, characters.count, &length, &characters)
+        }
+        guard status == noErr, length > 0 else { return nil }
+        return String(utf16CodeUnits: characters, count: length)
+    }
+}

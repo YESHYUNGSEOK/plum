@@ -1,18 +1,23 @@
 import CPty
+import AppKit
 import Foundation
 import GhosttyVt
 
 /// What a program running in a terminal told us about itself.
 public enum AgentStatus: String, Codable, Sendable {
-    case idle, working, waiting, done
+    /// `monitoring`: the agent's turn is over, but work it started in the
+    /// background (a command, a monitor, a scheduled wakeup) will bring it
+    /// back. Nothing for the user to do; not done either.
+    case idle, monitoring, working, waiting, done
 
     /// Which state wins when one workspace has several tabs.
     public var urgency: Int {
         switch self {
         case .idle: 0
-        case .working: 1
-        case .done: 2
-        case .waiting: 3
+        case .monitoring: 1
+        case .working: 2
+        case .done: 3
+        case .waiting: 4
         }
     }
 }
@@ -26,6 +31,22 @@ public enum TerminalSignal {
 }
 
 public struct TerminalTheme {
+    /// What new terminals get, and what every terminal is switched to when
+    /// the accent changes.
+    nonisolated(unsafe) public static var current = TerminalTheme()
+
+    public static func dark(cursor: (UInt8, UInt8, UInt8)) -> TerminalTheme {
+        var theme = TerminalTheme()
+        theme.cursor = cursor
+        theme.selection = mix(cursor, theme.background, 0.3)
+        return theme
+    }
+
+    static func mix(_ a: (UInt8, UInt8, UInt8), _ b: (UInt8, UInt8, UInt8), _ amount: Double) -> (UInt8, UInt8, UInt8) {
+        func channel(_ x: UInt8, _ y: UInt8) -> UInt8 { UInt8((Double(x) * amount + Double(y) * (1 - amount)).rounded()) }
+        return (channel(a.0, b.0), channel(a.1, b.1), channel(a.2, b.2))
+    }
+
     public var foreground: (UInt8, UInt8, UInt8) = (0xDC, 0xDC, 0xE2)
     public var background: (UInt8, UInt8, UInt8) = (0x1A, 0x1A, 0x1D)
     public var cursor: (UInt8, UInt8, UInt8) = (0xC5, 0x8A, 0xF9)
@@ -42,10 +63,10 @@ public struct TerminalTheme {
 
 /// One terminal: a pty, the program on it, and the VT state it draws into.
 ///
-/// Threads: the pty is read and parsed on `ioQueue`. Everything public is
-/// called from the main thread. `termLock` guards the terminal handle and
-/// `renderLock` guards the render state; when both are needed, take
-/// `termLock` first.
+/// Threads: the pty is read and parsed on a thread of its own and written on
+/// `writeQueue`. Everything public is called from the main thread.
+/// `termLock` guards the terminal handle and `renderLock` guards the render
+/// state; when both are needed, take `termLock` first.
 public final class TerminalSession {
     public let id: UUID
     public private(set) var cols: UInt16
@@ -65,18 +86,50 @@ public final class TerminalSession {
     private(set) var renderState: GhosttyRenderState
     private let keyEncoder: GhosttyKeyEncoder
     private let keyEvent: GhosttyKeyEvent
+    // Made when first needed: most terminals never see a mouse or a search.
+    private var mouseEncoder: GhosttyMouseEncoder?
+    private var mouseEvent: GhosttyMouseEvent?
+    private var search: GhosttySearch?
 
-    private let ioQueue: DispatchQueue
-    private var masterFD: Int32 = -1
+    /// The pty's master side. The reader thread and pending writes hold it
+    /// too, so its descriptor is closed only once none of them can use it.
+    private final class Pty {
+        let fd: Int32
+        /// The other end's device, for waking the reader (see deinit).
+        let slavePath: String?
+        init(fd: Int32, slavePath: String?) {
+            self.fd = fd
+            self.slavePath = slavePath
+        }
+
+        deinit { close(fd) }
+    }
+
+    /// A terminal the terminal host keeps (see `TerminalHost`): `pty` is a
+    /// connection to the host, and resizing and ending go through it.
+    public struct Remote {
+        public let resize: (_ cols: UInt16, _ rows: UInt16, _ width: UInt16, _ height: UInt16) -> Void
+        public let end: () -> Void
+        public init(resize: @escaping (UInt16, UInt16, UInt16, UInt16) -> Void, end: @escaping () -> Void) {
+            self.resize = resize
+            self.end = end
+        }
+    }
+
+    private var remote: Remote?
+    public var isRemote: Bool { remote != nil }
+    private var pty: Pty?
+    private let writeQueue: DispatchQueue
     private var pid: pid_t = 0
-    private var readSource: DispatchSourceRead?
     private var exitSource: DispatchSourceProcess?
-    private var writeSource: DispatchSourceWrite?
-    private var writeSourceActive = false
-    private var pendingWrite = Data() // ioQueue only
-    private var pendingWriteOffset = 0 // ioQueue only
-    /// Bytes received from the program so far. Diagnostic; read loosely.
-    public private(set) var bytesReceived = 0
+    /// Output read from the pty so far, in bytes. Guarded by `termLock`: the reader
+    /// thread adds to it, the main thread reads it.
+    private var received = 0
+    public var bytesReceived: Int {
+        termLock.lock()
+        defer { termLock.unlock() }
+        return received
+    }
 
     // Guarded by termLock.
     private var held = false
@@ -85,11 +138,15 @@ public final class TerminalSession {
     private var cellWidthPx: UInt32 = 8
     private var cellHeightPx: UInt32 = 16
 
-    public init(id: UUID = UUID(), cols: UInt16 = 80, rows: UInt16 = 24, theme: TerminalTheme = .init()) {
+    /// The colors it draws with: dark or light, and the accent's cursor.
+    public private(set) var theme: TerminalTheme
+
+    public init(id: UUID = UUID(), cols: UInt16 = 80, rows: UInt16 = 24, theme: TerminalTheme = .current) {
         self.id = id
+        self.theme = theme
         self.cols = cols
         self.rows = rows
-        ioQueue = DispatchQueue(label: "plum.terminal.io", qos: .userInteractive)
+        writeQueue = DispatchQueue(label: "plum.terminal.write", qos: .userInteractive)
 
         var term: GhosttyTerminal?
         var render: GhosttyRenderState?
@@ -109,11 +166,24 @@ public final class TerminalSession {
     }
 
     deinit {
-        readSource?.cancel()
+        ghostty_search_free(search)
+        ghostty_mouse_encoder_free(mouseEncoder)
+        ghostty_mouse_event_free(mouseEvent)
         exitSource?.cancel()
-        if writeSource != nil, !writeSourceActive { writeSource?.resume() }
-        writeSource?.cancel()
-        if pid > 0 {
+        // The reader thread is asleep in read(2), which nothing else can
+        // interrupt. A byte from the other end wakes it; it then finds the
+        // session gone and ends, letting go of the pty. A host's terminal
+        // is only let go of, not ended: the app is quitting, and the host
+        // keeps it running.
+        if remote != nil, let pty { shutdown(pty.fd, SHUT_RDWR) }
+        if remote == nil, let path = pty?.slavePath {
+            let slave = open(path, O_WRONLY | O_NOCTTY | O_NONBLOCK)
+            if slave >= 0 {
+                _ = Darwin.write(slave, "\n", 1)
+                close(slave)
+            }
+        }
+        if remote == nil, pid > 0 {
             kill(pid, SIGHUP)
             // Nobody is left to collect it later; don't leave a zombie.
             let child = pid
@@ -167,10 +237,7 @@ public final class TerminalSession {
             guard ghostty_terminal_get(terminal, GHOSTTY_TERMINAL_DATA_TITLE, &value) == GHOSTTY_SUCCESS else { return }
             let title = sanitizeForDisplay(String(ghostty: value), limit: 200)
             let session = TerminalSession.from(userdata)
-            DispatchQueue.main.async { [weak session] in
-                session?.title = title
-                session?.onTitle?(title)
-            }
+            DispatchQueue.main.async { [weak session] in session?.titleArrived(title) }
         }
         set(GHOSTTY_TERMINAL_OPT_TITLE_CHANGED, unsafeBitCast(titleChanged, to: UnsafeRawPointer.self))
 
@@ -224,6 +291,24 @@ public final class TerminalSession {
         }
         set(GHOSTTY_TERMINAL_OPT_SIZE, unsafeBitCast(size, to: UnsafeRawPointer.self))
 
+        // OSC 52 and the like: vim's "+y, tmux, a program over ssh copying to
+        // the Mac's clipboard. Only text is taken; reading the clipboard
+        // back is never offered.
+        let clipboardWrite: GhosttyTerminalClipboardWriteFn = { _, _, request in
+            guard let request else { return }
+            var reply = GhosttyClipboardWriteReply(
+                size: MemoryLayout<GhosttyClipboardWriteReply>.size, result: GHOSTTY_CLIPBOARD_WRITE_RESULT_UNSUPPORTED, remember: false)
+            let write = request.pointee
+            let contents = (0..<write.contents_len).map { write.contents[$0] }
+            if write.location == GHOSTTY_CLIPBOARD_LOCATION_STANDARD,
+               let text = contents.first(where: { String(ghostty: $0.mime).hasPrefix("text/plain") }).map({ String(ghostty: $0.data) }) {
+                DispatchQueue.main.async { TerminalSession.copyToClipboard(text) }
+                reply.result = GHOSTTY_CLIPBOARD_WRITE_RESULT_SUCCESS
+            }
+            write.reply(request, &reply)
+        }
+        set(GHOSTTY_TERMINAL_OPT_CLIPBOARD_WRITE, unsafeBitCast(clipboardWrite, to: UnsafeRawPointer.self))
+
         let colorScheme: GhosttyTerminalColorSchemeFn = { _, _, out in
             out?.pointee = GHOSTTY_COLOR_SCHEME_DARK
             return true
@@ -234,6 +319,7 @@ public final class TerminalSession {
     public func applyTheme(_ theme: TerminalTheme) {
         termLock.lock()
         defer { termLock.unlock() }
+        self.theme = theme
         var fg = GhosttyColorRgb(r: theme.foreground.0, g: theme.foreground.1, b: theme.foreground.2)
         var bg = GhosttyColorRgb(r: theme.background.0, g: theme.background.1, b: theme.background.2)
         var cursor = GhosttyColorRgb(r: theme.cursor.0, g: theme.cursor.1, b: theme.cursor.2)
@@ -250,6 +336,30 @@ public final class TerminalSession {
         }
     }
 
+    // Main thread.
+    private var pendingTitle: String?
+    private var titleScheduled = false
+    private var titleShownAt: UInt64 = 0
+
+    /// Shows a new title, at most four a second. Agents animate a spinner in
+    /// their title while they work; each new title redraws the tab bar, and
+    /// nobody reads a label that changes ten times a second. The latest one
+    /// is always shown, and the first after a quiet spell right away. Main thread.
+    private func titleArrived(_ newTitle: String) {
+        pendingTitle = newTitle
+        guard !titleScheduled else { return }
+        titleScheduled = true
+        let since = Double(DispatchTime.now().uptimeNanoseconds - titleShownAt) / 1e9
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, 0.25 - since)) { [weak self] in
+            guard let self, let newTitle = pendingTitle else { return }
+            titleScheduled = false
+            pendingTitle = nil
+            titleShownAt = DispatchTime.now().uptimeNanoseconds
+            title = newTitle
+            onTitle?(newTitle)
+        }
+    }
+
     private static func from(_ userdata: UnsafeMutableRawPointer) -> TerminalSession {
         Unmanaged<TerminalSession>.fromOpaque(userdata).takeUnretainedValue()
     }
@@ -263,7 +373,7 @@ public final class TerminalSession {
     /// Starts `shell` as a login shell in `cwd`. `environment` is the complete
     /// environment of the child.
     public func start(shell: String, cwd: String, environment: [String: String]) throws {
-        precondition(masterFD < 0, "session already started")
+        precondition(pty == nil, "session already started")
         let shellName = "-" + (shell as NSString).lastPathComponent // leading "-" = login shell
         let argv: [UnsafeMutablePointer<CChar>?] = [strdup(shellName), nil]
         let envp: [UnsafeMutablePointer<CChar>?] = environment.map { strdup("\($0.key)=\($0.value)") } + [nil]
@@ -275,82 +385,138 @@ public final class TerminalSession {
         var child: pid_t = 0
         let fd = plum_pty_spawn(shell, argv, envp, cwd, cols, rows, &child)
         guard fd >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
-        _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
-        masterFD = fd
+        let pty = Pty(fd: fd, slavePath: ptsname(fd).map { String(cString: $0) })
+        self.pty = pty
         pid = child
         isRunning = true
-
-        let read = DispatchSource.makeReadSource(fileDescriptor: fd, queue: ioQueue)
-        read.setEventHandler { [weak self] in self?.drainPty() }
-        read.setCancelHandler { close(fd) }
-        readSource = read
-        read.resume()
+        startReading(pty)
 
         // Collect the exit status when the shell ends, or it stays a zombie
         // for as long as the app runs.
-        let exit = DispatchSource.makeProcessSource(identifier: child, eventMask: .exit, queue: ioQueue)
-        exit.setEventHandler { [weak self] in
+        let exit = DispatchSource.makeProcessSource(identifier: child, eventMask: .exit, queue: .global(qos: .utility))
+        exit.setEventHandler { [weak self, weak exit] in
             var status: Int32 = 0
             waitpid(child, &status, 0)
-            self?.pid = 0
-            self?.exitSource?.cancel()
-            self?.exitSource = nil
+            exit?.cancel()
+            DispatchQueue.main.async { self?.pid = 0 }
         }
         exitSource = exit
         exit.resume()
-
-        let write = DispatchSource.makeWriteSource(fileDescriptor: fd, queue: ioQueue)
-        write.setEventHandler { [weak self] in self?.flushWrites() }
-        writeSource = write // stays suspended until a write would block
     }
 
-    private func drainPty() {
-        let capacity = 128 * 1024
-        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: capacity)
-        defer { buffer.deallocate() }
+    /// Takes over a terminal the host keeps. `fd` is the connection the host
+    /// answered on: the terminal's screen arrives first, then its output.
+    public func attach(fd: Int32, pid: pid_t, remote: Remote) {
+        precondition(pty == nil, "session already started")
+        let pty = Pty(fd: fd, slavePath: nil)
+        self.pty = pty
+        self.pid = pid
+        self.remote = remote
+        isRunning = true
+        startReading(pty)
+    }
 
-        // Bounded so a flood of output can't starve writes queued behind us.
-        var budget = 4 * 1024 * 1024
-        while budget > 0 {
-            let n = read(masterFD, buffer, capacity)
-            if n > 0 {
-                budget -= n
-                bytesReceived += n
-                termLock.lock()
-                ghostty_terminal_vt_write(terminal, buffer, n)
-                let post = !dirtyPosted
-                dirtyPosted = true
-                termLock.unlock()
-                if post { DispatchQueue.main.async { [weak self] in self?.onDirty?() } }
-            } else if n < 0, errno == EINTR {
-                continue
-            } else if n < 0, errno == EAGAIN {
-                return
-            } else {
-                childExited() // EOF, or EIO once the last slave fd closes
-                return
+    private func startReading(_ pty: Pty) {
+        // Output is read on a thread of its own, asleep in a blocking read(2).
+        // The pty hands over about 1 KB per read, so the time to wake for each
+        // kilobyte sets the speed. The kernel wakes a thread waiting in read
+        // directly; waiting through poll or a dispatch source adds a wakeup
+        // per kilobyte. Reading `cat` output on this Mac (M4 Pro): blocking
+        // read 190 MB/s, poll 147, dispatch source 133.
+        let reader = Thread { [weak self] in
+            // The thread's own buffer: the session may go away while it reads.
+            let buffer = UnsafeMutableRawBufferPointer.allocate(byteCount: 64 * 1024, alignment: 16)
+            defer { buffer.deallocate() }
+            while true {
+                let n = read(pty.fd, buffer.baseAddress, buffer.count)
+                if n < 0, errno == EINTR { continue }
+                guard let self else { return } // gone; deinit woke this read
+                guard n > 0 else { break } // EOF, or EIO once the last slave fd closes
+                // Parsed here, between reads. Handing it to another thread
+                // instead sped up output that is slow to parse (TUI redraws,
+                // 1.4x) but slowed the rest (plain text 0.7x) and cost more
+                // CPU per byte everywhere (1.1-2.4x): the wrong trade with
+                // many sessions running at the modest rates agents write.
+                self.consume(UnsafeRawBufferPointer(rebasing: buffer[..<n]))
+            }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                isRunning = false
+                onExit?()
             }
         }
+        reader.name = "plum.terminal.read"
+        reader.qualityOfService = .userInteractive
+        reader.start()
     }
 
-    /// The pty closed: nothing more can be read or written.
-    private func childExited() {
-        readSource?.cancel()
-        readSource = nil
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            isRunning = false
-            onExit?()
+    /// The screen and its scrollback as VT sequences that recreate them in
+    /// another terminal, with how many bytes of output it has read: what
+    /// the terminal host needs to keep the screen once the app quits.
+    public func snapshot() -> (screen: Data, received: Int) {
+        termLock.lock()
+        defer { termLock.unlock() }
+        return (Self.formatVT(terminal), received)
+    }
+
+    /// `terminal`'s screen and scrollback as VT sequences, with the modes,
+    /// cursor and keyboard state that differ from a new terminal's. Not the
+    /// palette: the colors are the app's, not the screen's.
+    static func formatVT(_ terminal: GhosttyTerminal) -> Data {
+        var formatter: GhosttyFormatter?
+        guard ghostty_formatter_terminal_new(nil, &formatter, terminal) == GHOSTTY_SUCCESS, let formatter else { return Data() }
+        defer { ghostty_formatter_free(formatter) }
+        var emit = GHOSTTY_FORMATTER_FORMAT_VT
+        ghostty_formatter_set(formatter, GHOSTTY_FORMATTER_OPT_EMIT, &emit)
+        var extras = GhosttyFormatterExtras(GHOSTTY_FORMATTER_EXTRAS_ALL) & ~GhosttyFormatterExtras(GHOSTTY_FORMATTER_EXTRA_PALETTE)
+        ghostty_formatter_set(formatter, GHOSTTY_FORMATTER_OPT_EXTRAS, &extras)
+        var bytes: UnsafeMutablePointer<UInt8>?
+        var length = 0
+        guard ghostty_formatter_format_alloc(formatter, nil, &bytes, &length) == GHOSTTY_SUCCESS, let bytes else { return Data() }
+        defer { ghostty_free(nil, bytes, length) }
+        var screen = Data(bytes: bytes, count: length)
+        // The title a program gave its window isn't part of the screen; an
+        // agent's names its conversation, so it comes along too.
+        var title = GhosttyString()
+        if ghostty_terminal_get(terminal, GHOSTTY_TERMINAL_DATA_TITLE, &title) == GHOSTTY_SUCCESS {
+            let text = String(ghostty: title).filter { $0 != "\u{1b}" && $0 != "\u{7}" }
+            if !text.isEmpty { screen.append(contentsOf: Array("\u{1b}]2;\(text)\u{1b}\\".utf8)) }
         }
+        return screen
+    }
+
+    /// Parses output read from the pty. Reader thread.
+    private func consume(_ bytes: UnsafeRawBufferPointer) {
+        termLock.lock()
+        received += bytes.count
+        ghostty_terminal_vt_write(terminal, bytes.baseAddress!.assumingMemoryBound(to: UInt8.self), bytes.count)
+        let post = !dirtyPosted
+        dirtyPosted = true
+        termLock.unlock()
+        if post { DispatchQueue.main.async { [weak self] in self?.onDirty?() } }
     }
 
     /// Queues bytes for the program. Safe from any thread; order is kept.
     public func write(_ data: Data) {
-        guard !data.isEmpty else { return }
-        ioQueue.async { [weak self] in
-            guard let self, masterFD >= 0, readSource != nil else { return }
-            pendingWrite.append(data)
-            flushWrites()
+        guard !data.isEmpty, let pty else { return }
+        writeQueue.async {
+            // A blocking write: a program that isn't reading its input holds
+            // the rest back, in order, while its output keeps being read on
+            // the reader thread. Once the program is gone, writes fail and the
+            // rest is dropped.
+            data.withUnsafeBytes { raw in
+                var offset = 0
+                while offset < raw.count {
+                    let n = Darwin.write(pty.fd, raw.baseAddress! + offset, raw.count - offset)
+                    if n > 0 {
+                        offset += n
+                    } else if n < 0, errno == EINTR {
+                        continue
+                    } else {
+                        return
+                    }
+                }
+            }
         }
     }
 
@@ -360,17 +526,17 @@ public final class TerminalSession {
     /// Typing earlier works too, but the tty echoes the text above the prompt
     /// before the shell is ready to show it properly.
     public func writeWhenReady(_ text: String) {
+        guard let pty, remote == nil else { return write(text) }
         let deadline = DispatchTime.now().uptimeNanoseconds + 4_000_000_000
         func check() {
-            ioQueue.asyncAfter(deadline: .now() + 0.03) { [weak self] in
-                guard let self, readSource != nil else { return }
+            writeQueue.asyncAfter(deadline: .now() + 0.03) { [weak self] in
+                guard let self else { return }
                 // A shell's line editor switches the tty out of canonical
                 // mode when it starts reading; that is the moment to type.
                 var attributes = termios()
-                let editing = tcgetattr(masterFD, &attributes) == 0 && attributes.c_lflag & tcflag_t(ICANON) == 0
+                let editing = tcgetattr(pty.fd, &attributes) == 0 && attributes.c_lflag & tcflag_t(ICANON) == 0
                 if editing || DispatchTime.now().uptimeNanoseconds > deadline {
-                    pendingWrite.append(Data(text.utf8))
-                    flushWrites()
+                    write(text)
                 } else {
                     check()
                 }
@@ -379,43 +545,42 @@ public final class TerminalSession {
         check()
     }
 
-    private func flushWrites() {
-        while pendingWriteOffset < pendingWrite.count {
-            let n = pendingWrite.withUnsafeBytes { raw in
-                Darwin.write(masterFD, raw.baseAddress! + pendingWriteOffset, raw.count - pendingWriteOffset)
-            }
-            if n > 0 {
-                pendingWriteOffset += n
-            } else if n < 0, errno == EINTR {
-                continue
-            } else if n < 0, errno == EAGAIN {
-                // The program isn't reading. Wait for room without blocking
-                // the queue, so its output keeps being read meanwhile.
-                if !writeSourceActive { writeSourceActive = true; writeSource?.resume() }
-                return
-            } else {
-                break
-            }
-        }
-        pendingWrite.removeAll(keepingCapacity: pendingWrite.count < 1 << 20)
-        pendingWriteOffset = 0
-        if writeSourceActive { writeSourceActive = false; writeSource?.suspend() }
-    }
-
     public func terminate() {
+        if let remote { return remote.end() }
         if pid > 0 { kill(pid, SIGHUP) }
     }
 
     /// The program in the foreground (an agent, an editor, a build), or nil
     /// when the shell is at its prompt. Closing the tab would end it.
+    /// TCP ports that programs started in this terminal listen on.
+    public func listeningPorts() -> [UInt16] {
+        pid > 0 ? ListeningPorts.under(pid) : []
+    }
+
     public func foregroundProgram() -> String? {
-        ioQueue.sync {
-            guard masterFD >= 0, pid > 0 else { return nil }
-            let group = tcgetpgrp(masterFD)
-            guard group > 0, group != pid else { return nil }
-            var name = [CChar](repeating: 0, count: 64)
-            return proc_name(group, &name, UInt32(name.count)) > 0 ? String(cString: name) : String(localized: "알 수 없는 프로그램")
+        guard pid > 0 else { return nil }
+        // The shell's terminal's foreground group, read from the process:
+        // a terminal the host keeps has no pty here to ask.
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var query: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        guard sysctl(&query, 4, &info, &size, nil, 0) == 0, size > 0 else { return nil }
+        let group = info.kp_eproc.e_tpgid
+        guard group > 0, group != pid else { return nil }
+        return Self.programName(group) ?? String(localized: "알 수 없는 프로그램")
+    }
+
+    /// What a process runs. Claude Code's own installer runs it as
+    /// `…/claude/versions/2.1.328`, a file named for its version: then the
+    /// folder above `versions` names it.
+    static func programName(_ pid: pid_t) -> String? {
+        var path = [CChar](repeating: 0, count: Int(MAXPATHLEN) * 4)
+        if proc_pidpath(pid, &path, UInt32(path.count)) > 0 {
+            let parts = String(cString: path).split(separator: "/")
+            if parts.count >= 3, parts[parts.count - 2] == "versions" { return String(parts[parts.count - 3]) }
         }
+        var name = [CChar](repeating: 0, count: 64)
+        return proc_name(pid, &name, UInt32(name.count)) > 0 ? String(cString: name) : nil
     }
 
     // MARK: Size and scrolling
@@ -431,9 +596,11 @@ public final class TerminalSession {
         self.cellHeightPx = cellHeightPx
         if changed { ghostty_terminal_resize(terminal, cols, rows, cellWidthPx, cellHeightPx) }
         termLock.unlock()
-        guard changed, masterFD >= 0 else { return }
+        guard changed, let pty else { return }
         let clamp = { (v: UInt32) in UInt16(min(v, UInt32(UInt16.max))) }
-        _ = plum_pty_resize(masterFD, cols, rows, clamp(UInt32(cols) * cellWidthPx), clamp(UInt32(rows) * cellHeightPx))
+        let (width, height) = (clamp(UInt32(cols) * cellWidthPx), clamp(UInt32(rows) * cellHeightPx))
+        if let remote { return remote.resize(cols, rows, width, height) }
+        _ = plum_pty_resize(pty.fd, cols, rows, width, height)
     }
 
     public func scroll(byRows delta: Int) {
@@ -481,6 +648,17 @@ public final class TerminalSession {
 
     // MARK: Input
 
+    /// Where programs' clipboard writes go. Scripted checks swap it out so
+    /// the user's clipboard is left alone.
+    public static var copyToClipboard: (String) -> Void = { text in
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    /// ⌥ is Meta (Esc before the key) rather than macOS's way to type
+    /// symbols. The same for every terminal: a setting.
+    public static var optionAsMeta = false
+
     public struct Key {
         public var key: GhosttyKey
         public var action: GhosttyKeyAction = GHOSTTY_KEY_ACTION_PRESS
@@ -504,6 +682,8 @@ public final class TerminalSession {
         ghostty_key_event_set_unshifted_codepoint(keyEvent, key.unshiftedCodepoint)
 
         withTerminal { _ = ghostty_key_encoder_set_from_terminal(keyEncoder, $0) }
+        var optionAsAlt = Self.optionAsMeta ? GHOSTTY_OPTION_AS_ALT_TRUE : GHOSTTY_OPTION_AS_ALT_FALSE
+        ghostty_key_encoder_set(keyEncoder, GHOSTTY_KEY_ENCODER_OPT_MACOS_OPTION_AS_ALT, &optionAsAlt)
 
         // The event borrows the text, so encode while the bytes are alive.
         var utf8 = Array((key.text ?? "").utf8)
@@ -613,6 +793,24 @@ public final class TerminalSession {
         }
     }
 
+    /// Everything: what scrolled away, and the screen.
+    public func selectAll() {
+        withTerminal { terminal in
+            var total = 0
+            ghostty_terminal_get(terminal, GHOSTTY_TERMINAL_DATA_TOTAL_ROWS, &total)
+            func ref(_ x: UInt16, _ y: Int) -> GhosttyGridRef? {
+                var p = GhosttyPoint()
+                p.tag = GHOSTTY_POINT_TAG_SCREEN
+                p.value.coordinate = GhosttyPointCoordinate(x: x, y: UInt32(max(0, y)))
+                var ref = GhosttyGridRef()
+                return ghostty_terminal_grid_ref(terminal, p, &ref) == GHOSTTY_SUCCESS ? ref : nil
+            }
+            guard let a = ref(0, 0), let b = ref(cols - 1, total - 1) else { return }
+            var selection = GhosttySelection(start: a, end: b, rectangle: false)
+            ghostty_terminal_set(terminal, GHOSTTY_TERMINAL_OPT_SELECTION, &selection)
+        }
+    }
+
     public func clearSelection() {
         withTerminal { _ = ghostty_terminal_set($0, GHOSTTY_TERMINAL_OPT_SELECTION, nil) }
     }
@@ -662,6 +860,212 @@ public final class TerminalSession {
     /// them. For tests.
     public func feed(_ text: String) {
         Array(text.utf8).withUnsafeBytes { feed($0) }
+    }
+
+    // MARK: Mouse
+
+    /// A program asked to be told about the mouse (vim, htop, tmux).
+    public var wantsMouse: Bool {
+        withTerminal { terminal in
+            var tracking = false
+            ghostty_terminal_get(terminal, GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING, &tracking)
+            return tracking
+        }
+    }
+
+    /// A full-screen program is up (a pager, an editor): there is no
+    /// scrollback to move through.
+    public var isAlternateScreen: Bool {
+        withTerminal { terminal in
+            var screen = GHOSTTY_TERMINAL_SCREEN_PRIMARY
+            ghostty_terminal_get(terminal, GHOSTTY_TERMINAL_DATA_ACTIVE_SCREEN, &screen)
+            return screen == GHOSTTY_TERMINAL_SCREEN_ALTERNATE
+        }
+    }
+
+    /// The Kitty keyboard protocol is on: the program tells keys such as
+    /// Shift+Return apart itself.
+    public var usesKittyKeyboard: Bool {
+        withTerminal { terminal in
+            var flags: UInt8 = 0
+            ghostty_terminal_get(terminal, GHOSTTY_TERMINAL_DATA_KITTY_KEYBOARD_FLAGS, &flags)
+            return flags != 0
+        }
+    }
+
+    public struct Mouse {
+        public var action: GhosttyMouseAction
+        /// Nil for motion with no button held.
+        public var button: GhosttyMouseButton?
+        public var mods: GhosttyMods = 0
+        /// Pixels from the view's top left.
+        public var x: Float
+        public var y: Float
+        public var anyButtonPressed = false
+        public init(action: GhosttyMouseAction, button: GhosttyMouseButton?, x: Float, y: Float) {
+            self.action = action
+            self.button = button
+            self.x = x
+            self.y = y
+        }
+    }
+
+    /// Reports a mouse event in the form the program asked for. Returns
+    /// false when the program isn't listening for it.
+    @discardableResult
+    public func send(_ mouse: Mouse, viewWidth: UInt32, viewHeight: UInt32, padding: UInt32) -> Bool {
+        if mouseEncoder == nil {
+            ghostty_mouse_encoder_new(nil, &mouseEncoder)
+            ghostty_mouse_event_new(nil, &mouseEvent)
+            var track = true // motion within one cell is reported once
+            ghostty_mouse_encoder_set(mouseEncoder, GHOSTTY_MOUSE_ENCODER_OPT_TRACK_LAST_CELL, &track)
+        }
+        guard let mouseEncoder, let mouseEvent else { return false }
+        withTerminal { _ = ghostty_mouse_encoder_set_from_terminal(mouseEncoder, $0) }
+        var size = GhosttyMouseEncoderSize(
+            size: MemoryLayout<GhosttyMouseEncoderSize>.size, screen_width: viewWidth, screen_height: viewHeight,
+            cell_width: cellWidthPx, cell_height: cellHeightPx,
+            padding_top: padding, padding_bottom: padding, padding_right: padding, padding_left: padding)
+        ghostty_mouse_encoder_set(mouseEncoder, GHOSTTY_MOUSE_ENCODER_OPT_SIZE, &size)
+        var pressed = mouse.anyButtonPressed
+        ghostty_mouse_encoder_set(mouseEncoder, GHOSTTY_MOUSE_ENCODER_OPT_ANY_BUTTON_PRESSED, &pressed)
+        ghostty_mouse_event_set_action(mouseEvent, mouse.action)
+        if let button = mouse.button {
+            ghostty_mouse_event_set_button(mouseEvent, button)
+        } else {
+            ghostty_mouse_event_clear_button(mouseEvent)
+        }
+        ghostty_mouse_event_set_mods(mouseEvent, mouse.mods)
+        ghostty_mouse_event_set_position(mouseEvent, GhosttyMousePosition(x: mouse.x, y: mouse.y))
+        var out = [UInt8](repeating: 0, count: 64)
+        var written = 0
+        guard ghostty_mouse_encoder_encode(mouseEncoder, mouseEvent, &out, out.count, &written) == GHOSTTY_SUCCESS,
+              written > 0 else { return false }
+        write(Data(out[0..<written]))
+        return true
+    }
+
+    // MARK: Prompts, links, folder
+
+    /// Moves the view by whole commands: -1 shows the previous prompt at
+    /// the top. Needs a shell that marks its prompts (OSC 133).
+    public func scrollToPrompt(_ delta: Int) {
+        var behavior = GhosttyTerminalScrollViewport()
+        behavior.tag = GHOSTTY_TERMINAL_SCROLL_VIEWPORT_DELTA_PROMPT
+        behavior.value.delta_prompt = delta
+        withTerminal { _ = ghostty_terminal_scroll_viewport($0, behavior) }
+    }
+
+    /// The address of an OSC 8 link at a cell (text whose link isn't the
+    /// text itself: `ls --hyperlink`, gh, many CLIs).
+    public func hyperlink(at point: (Int, Int)) -> String? {
+        withTerminal { terminal in
+            guard var ref = gridRef(terminal, viewport: point) else { return nil }
+            var length = 0
+            guard ghostty_grid_ref_hyperlink_uri(&ref, nil, 0, &length) == GHOSTTY_OUT_OF_SPACE, length > 0, length < 8192 else { return nil }
+            var bytes = [UInt8](repeating: 0, count: length)
+            guard ghostty_grid_ref_hyperlink_uri(&ref, &bytes, length, &length) == GHOSTTY_SUCCESS else { return nil }
+            return String(decoding: bytes.prefix(length), as: UTF8.self)
+        }
+    }
+
+    /// The folder the shell is in now: where a new tab beside it starts.
+    public func currentDirectory() -> String? {
+        guard pid > 0 else { return nil }
+        var info = proc_vnodepathinfo()
+        let size = Int32(MemoryLayout<proc_vnodepathinfo>.size)
+        guard proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &info, size) == size else { return nil }
+        let path = withUnsafeBytes(of: info.pvi_cdir.vip_path) { String(cString: $0.bindMemory(to: CChar.self).baseAddress!) }
+        return path.isEmpty ? nil : path
+    }
+
+    // MARK: Preferences
+
+    public enum CursorShape: String, Codable, CaseIterable, Sendable { case block, bar, underline }
+
+    /// The cursor a program gets unless it asks for another, and how much
+    /// output is kept to scroll back to.
+    public func applyPreferences(cursor: CursorShape, blink: Bool, scrollbackMB: Int) {
+        withTerminal { terminal in
+            var style = switch cursor {
+            case .block: GHOSTTY_CURSOR_STYLE_BLOCK
+            case .bar: GHOSTTY_CURSOR_STYLE_BAR
+            case .underline: GHOSTTY_CURSOR_STYLE_UNDERLINE
+            }
+            ghostty_terminal_set(terminal, GHOSTTY_TERMINAL_OPT_DEFAULT_CURSOR_STYLE, &style)
+            var blinks = blink
+            ghostty_terminal_set(terminal, GHOSTTY_TERMINAL_OPT_DEFAULT_CURSOR_BLINK, &blinks)
+            var bytes = max(1, scrollbackMB) * 1_000_000
+            ghostty_terminal_set(terminal, GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES, &bytes)
+            // Back to the default now, as a program's own "CSI 0 q" would.
+            let reset = Array("\u{1b}[0 q".utf8)
+            ghostty_terminal_vt_write(terminal, reset, reset.count)
+        }
+        onDirty?()
+    }
+
+    // MARK: Clearing
+
+    /// ⌘K: the screen and everything scrolled off it go, and the program
+    /// is asked to draw again (a shell prints its prompt).
+    public func clear() {
+        guard !isAlternateScreen else { return write("\u{0c}") } // a full-screen program just redraws
+        feed("\u{1b}[H\u{1b}[2J\u{1b}[3J")
+        write("\u{0c}")
+    }
+
+    // MARK: Search
+
+    /// Looks for `needle` in the screen and the scrollback and selects the
+    /// nearest match from the bottom. Returns which match is selected
+    /// (1 is the newest) and how many there are.
+    public func find(_ needle: String) -> (selected: Int, total: Int) {
+        withTerminal { terminal in
+            if search == nil { ghostty_search_new(nil, &search, terminal) }
+            guard let search else { return (0, 0) }
+            _ = needle.withGhosttyString { ghostty_search_set(search, GHOSTTY_SEARCH_OPT_NEEDLE, $0) }
+            // ponytail: runs to the end under the terminal lock; 10 MB of
+            // scrollback is searched in one go. Tick it across frames if a
+            // search ever stalls typing.
+            ghostty_search_run(search)
+            var selected = 0
+            if ghostty_search_get(search, GHOSTTY_SEARCH_DATA_SELECTED_INDEX, &selected) != GHOSTTY_SUCCESS {
+                ghostty_search_select_next(search)
+            }
+            return showMatch(search, in: terminal)
+        }
+    }
+
+    /// Moves to the next match up into history, or back down.
+    public func findNext(backward: Bool = false) -> (selected: Int, total: Int) {
+        withTerminal { terminal in
+            guard let search else { return (0, 0) }
+            _ = backward ? ghostty_search_select_prev(search) : ghostty_search_select_next(search)
+            return showMatch(search, in: terminal)
+        }
+    }
+
+    public func endFind() {
+        withTerminal { terminal in
+            guard let search else { return }
+            ghostty_search_set(search, GHOSTTY_SEARCH_OPT_NEEDLE, nil)
+            ghostty_terminal_set(terminal, GHOSTTY_TERMINAL_OPT_SELECTION, nil)
+        }
+    }
+
+    /// The selected match is shown as the selection: drawn like one, and ⌘C copies it.
+    private func showMatch(_ search: GhosttySearch, in terminal: GhosttyTerminal) -> (selected: Int, total: Int) {
+        var total = 0
+        ghostty_search_get(search, GHOSTTY_SEARCH_DATA_TOTAL_MATCHES, &total)
+        var index = 0
+        var match = GhosttySelection()
+        guard ghostty_search_get(search, GHOSTTY_SEARCH_DATA_SELECTED_INDEX, &index) == GHOSTTY_SUCCESS,
+              ghostty_search_get(search, GHOSTTY_SEARCH_DATA_SELECTED_MATCH, &match) == GHOSTTY_SUCCESS else {
+            ghostty_terminal_set(terminal, GHOSTTY_TERMINAL_OPT_SELECTION, nil)
+            return (0, total)
+        }
+        ghostty_terminal_set(terminal, GHOSTTY_TERMINAL_OPT_SELECTION, &match)
+        return (index + 1, total)
     }
 
     public func feed(_ bytes: UnsafeRawBufferPointer) {

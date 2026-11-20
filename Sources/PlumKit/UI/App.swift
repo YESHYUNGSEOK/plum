@@ -25,6 +25,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.mainMenu = buildMenu()
+        // Plum is dark, whatever the system is.
+        NSApp.appearance = NSAppearance(named: .darkAqua)
+        applyAccent()
+        model.onLookChanged = { [weak self] in self?.applyAccent() }
         // PLUM_DEBUG_OCCLUSION keeps the real "draw only when visible" rule
         // in a scripted run, to check that rule itself.
         TerminalView.drawsWhileOccluded = debug && ProcessInfo.processInfo.environment["PLUM_DEBUG_OCCLUSION"] != "1"
@@ -33,11 +37,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             // or touching the user's clipboard.
             TerminalView.openLink = { DebugLog.links.append($0.absoluteString) }
             TerminalView.pasteboard = NSPasteboard(name: NSPasteboard.Name("dev.plum.debug"))
+            TerminalSession.copyToClipboard = { DebugLog.copied.append($0) }
         }
         windowController = MainWindowController(model: model)
         windowController.window?.delegate = self
+        // Once a day at most, and silent unless there is something newer.
+        let lastCheck = UserDefaults.standard.double(forKey: "lastUpdateCheck")
+        if !debug, Date().timeIntervalSince1970 - lastCheck > 86400 {
+            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "lastUpdateCheck")
+            Task { await AppActions.checkForUpdates(model, quietly: true) }
+        }
         model.debugWindowNumber = { [weak self] in self?.windowController.window?.windowNumber ?? 0 }
-        model.debugTerminalView = { [weak self] in self?.windowController.terminalView }
+        model.debugTerminalView = { [weak self] in self?.currentArea.terminal }
+        model.onShowWindow = { [weak self] id in self?.showWorkspaceWindow(id) }
+        for id in model.ownWindows { showWorkspaceWindow(id, front: false) }
         model.debugWindow = { [weak self] in self?.windowController.window }
         model.debugToggleSidebar = { [weak self] in self?.windowController.toggleSidebar() }
         model.debugTraceDialogClose = { [weak self] done in self?.windowController.traceDialogClose(done) }
@@ -64,6 +77,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
+    /// The terminal host keeps every terminal; it gets their screens to keep too.
+    func applicationWillTerminate(_ notification: Notification) {
+        model.parkTerminals()
+    }
+
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         guard needsQuitConfirmation else { return true }
         askToQuit { confirmed in if confirmed { sender.close() } }
@@ -86,10 +104,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             .map { OSType($0) }.contains(reason)
     }
 
-    /// Quitting ends every shell and agent, so say so first.
+    /// Quitting leaves the terminal host's tabs running, to come back to.
+    /// Only tabs it couldn't take (the host didn't start) end with the app,
+    /// so only then is there something to ask about.
     private var needsQuitConfirmation: Bool {
         (!debug || ProcessInfo.processInfo.environment["PLUM_DEBUG_ASK_QUIT"] == "1")
-            && !quitConfirmed && model.tabs.values.contains { !$0.isEmpty }
+            && !quitConfirmed && model.tabsEndingOnQuit > 0
     }
 
     private var quitConfirmed = false
@@ -102,14 +122,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
         // A scripted check must not take the screen from whoever is working.
         if !debug { NSApp.activate(ignoringOtherApps: true) }
-        let running = model.tabs.values.reduce(0) { $0 + $1.count }
+        let running = model.tabsEndingOnQuit
         let programs = model.tabs.keys.flatMap { id in
             model.runningPrograms(in: id).map { "\(model.workspace(id)?.name ?? "") · \($0)" }
         }.sorted()
         let confirmation = Confirmation(
             title: String(localized: "Plum을 종료할까요?"),
             summary: String(localized: "열려 있는 터미널 \(running)개와 그 안에서 실행 중인 프로그램이 모두 종료됩니다."),
-            symbol: "power", sections: programs.isEmpty ? [] : [.init(title: String(localized: "실행 중인 프로그램"), lines: programs)],
+            sections: programs.isEmpty ? [] : [.init(title: String(localized: "실행 중인 프로그램"), lines: programs)],
             action: String(localized: "종료"), destructive: false)
         confirmation.onAnswer = { [weak self] confirmed in
             if confirmed { self?.quitConfirmed = true }
@@ -204,6 +224,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
         menu("Plum") { m in
             add(m, "Plum에 관하여", #selector(showAbout))
+            add(m, "업데이트 확인…", #selector(checkForUpdates))
             m.addItem(.separator())
             add(m, "설정…", #selector(showSettings), ",")
             m.addItem(.separator())
@@ -215,9 +236,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         menu("파일") { m in
             add(m, "새 워크스페이스…", #selector(newWorkspace), "n")
             add(m, "새 탭", #selector(newTab), "t")
+            add(m, "새 Claude 탭", #selector(newClaudeTab))
+            add(m, "새 Codex 탭", #selector(newCodexTab))
             add(m, "프로젝트 추가…", #selector(addProject), "o")
             m.addItem(.separator())
             add(m, "탭 닫기", #selector(closeTab), "w")
+            add(m, "닫은 탭 다시 열기", #selector(reopenClosedTab), "t", [.command, .shift])
+            m.addItem(.separator())
+            add(m, "새 창에서 열기", #selector(openInNewWindow), "n", [.command, .option])
+            add(m, "오른쪽으로 나누기", #selector(splitRight), "d")
+            add(m, "아래로 나누기", #selector(splitDown), "d", [.command, .shift])
         }
         menu("편집") { m in
             add(m, "실행 취소", Selector(("undo:")), "z", mine: false)
@@ -227,6 +255,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             add(m, "복사", #selector(NSText.copy(_:)), "c", mine: false)
             add(m, "붙여넣기", #selector(NSText.paste(_:)), "v", mine: false)
             add(m, "전체 선택", #selector(NSText.selectAll(_:)), "a", mine: false)
+            m.addItem(.separator())
+            add(m, "찾기…", #selector(find), "f")
+            add(m, "다음 찾기", #selector(findNext), "g")
+            add(m, "이전 찾기", #selector(findPrevious), "g", [.command, .shift])
+            add(m, "화면 지우기", #selector(clearTerminal), "k")
         }
         menu("보기") { m in
             add(m, "글자 크게", #selector(biggerFont), "+")
@@ -234,6 +267,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             add(m, "기본 크기", #selector(resetFont), "0")
             m.addItem(.separator())
             add(m, "사이드바 보기/가리기", #selector(toggleSidebar), "s", [.command, .control])
+            add(m, "전체 화면", #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control], mine: false)
+            add(m, "변경 보기", #selector(showChanges), "e", [.command, .shift])
+            m.addItem(.separator())
+            add(m, "이전 명령으로", #selector(previousPrompt), String(UnicodeScalar(NSUpArrowFunctionKey)!))
+            add(m, "다음 명령으로", #selector(nextPrompt), String(UnicodeScalar(NSDownArrowFunctionKey)!))
         }
         // Shifted keys are given as the character Shift makes ("}" for ⇧]):
         // a key press reports that character, and "]" plus ⇧ never matches it.
@@ -272,6 +310,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             m.addItem(.separator())
             add(m, "워크스페이스를 위로", #selector(moveWorkspaceUp), "[", [.command, .control, .option])
             add(m, "워크스페이스를 아래로", #selector(moveWorkspaceDown), "]", [.command, .control, .option])
+            let arrow = { (key: Int) in String(UnicodeScalar(UInt32(key))!) }
+            add(m, "왼쪽 창으로", #selector(paneLeft), arrow(NSLeftArrowFunctionKey), [.command, .option])
+            add(m, "오른쪽 창으로", #selector(paneRight), arrow(NSRightArrowFunctionKey), [.command, .option])
+            add(m, "위 창으로", #selector(paneUp), arrow(NSUpArrowFunctionKey), [.command, .option])
+            add(m, "아래 창으로", #selector(paneDown), arrow(NSDownArrowFunctionKey), [.command, .option])
             add(m, "탭을 왼쪽으로", #selector(moveTabLeft), "{", [.command, .option])
             add(m, "탭을 오른쪽으로", #selector(moveTabRight), "}", [.command, .option])
         }
@@ -295,6 +338,82 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     @objc private func showSettings() { model.sheet = .settings }
+
+    /// The accent from the settings, everywhere. Terminals are drawn by
+    /// Plum, not AppKit: their cursor and selection are told the new color.
+    private func applyAccent() {
+        Theme.accentChoice = model.state.settings.accent
+        guard let rgb = Theme.accentNS.usingColorSpace(.sRGB) else { return }
+        let cursor = (UInt8(rgb.redComponent * 255), UInt8(rgb.greenComponent * 255), UInt8(rgb.blueComponent * 255))
+        let theme = TerminalTheme.dark(cursor: cursor)
+        guard theme.cursor != TerminalTheme.current.cursor else { return }
+        TerminalTheme.current = theme
+        model.applyTerminalTheme(theme)
+        windowController?.terminalArea.setTheme(theme)
+        for own in workspaceWindows.values { own.area.setTheme(theme) }
+    }
+    @objc private func checkForUpdates() { Task { await AppActions.checkForUpdates(model, quietly: false) } }
+    @objc private func find() { currentArea.showFind() }
+    @objc private func findNext() { currentArea.findNext(backward: false) }
+    @objc private func findPrevious() { currentArea.findNext(backward: true) }
+    @objc private func clearTerminal() { currentArea.terminal?.clear() }
+    @objc private func previousPrompt() { currentArea.terminal?.scrollToPrompt(-1) }
+    @objc private func nextPrompt() { currentArea.terminal?.scrollToPrompt(1) }
+    @objc private func openInNewWindow() { if let id = model.selection { model.openInOwnWindow(id) } }
+
+    // MARK: Windows of their own
+
+    private var workspaceWindows: [UUID: WorkspaceWindowController] = [:]
+    /// The main window's own selection, to go back to when it comes forward.
+    private var mainSelection: UUID?
+
+    private func showWorkspaceWindow(_ id: UUID, front: Bool = true) {
+        let controller = workspaceWindows[id] ?? {
+            let controller = WorkspaceWindowController(model: model, workspaceID: id)
+            controller.onClose = { [weak self] in self?.workspaceWindows[id] = nil }
+            workspaceWindows[id] = controller
+            return controller
+        }()
+        if front {
+            controller.showWindow(nil)
+            controller.window?.makeKeyAndOrderFront(nil)
+        } else {
+            controller.window?.orderFront(nil)
+        }
+    }
+
+    /// The panel the menus act on: the window in front's, or the one
+    /// showing the selected workspace.
+    private var currentArea: TerminalAreaController {
+        if let key = NSApp.keyWindow, let own = workspaceWindows.values.first(where: { $0.window === key }) { return own.area }
+        if let selection = model.selection, let own = workspaceWindows[selection] { return own.area }
+        return windowController.terminalArea
+    }
+
+    func windowDidResignKey(_ notification: Notification) {
+        guard notification.object as? NSWindow === windowController.window,
+              let selection = model.selection, !model.ownWindows.contains(selection) else { return }
+        mainSelection = selection
+    }
+
+    /// Back in the main window: back to what it showed, not a workspace
+    /// that lives in another window.
+    func windowDidBecomeKey(_ notification: Notification) {
+        guard notification.object as? NSWindow === windowController.window, model.sheet == nil,
+              let selection = model.selection, model.ownWindows.contains(selection) else { return }
+        let fallback = model.workspaceOrder.first { !model.ownWindows.contains($0) }
+        model.select(mainSelection.flatMap { model.workspace($0) != nil && !model.ownWindows.contains($0) ? $0 : nil } ?? fallback)
+    }
+    @objc private func reopenClosedTab() { model.reopenClosedTab() }
+    @objc private func splitRight() { model.splitPane(.horizontal) }
+    @objc private func splitDown() { model.splitPane(.vertical) }
+    @objc private func paneLeft() { model.focusPane(dx: -1, dy: 0) }
+    @objc private func paneRight() { model.focusPane(dx: 1, dy: 0) }
+    @objc private func paneUp() { model.focusPane(dx: 0, dy: -1) }
+    @objc private func paneDown() { model.focusPane(dx: 0, dy: 1) }
+    @objc private func showChanges() {
+        if let workspace = model.selectedWorkspace, !workspace.isArchived { model.sheet = .diff(workspace) }
+    }
     @objc private func addProject() { AppActions.addProject(model) }
     @objc private func toggleSidebar() { windowController.toggleSidebar() }
     @objc private func nextTab() { model.cycleTab(1) }
@@ -324,8 +443,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         model.sheet = .newWorkspace(project)
     }
 
+    @objc private func newClaudeTab() {
+        if let selection = model.selection { model.openTab(in: selection, program: .claude) }
+    }
+
+    @objc private func newCodexTab() {
+        if let selection = model.selection { model.openTab(in: selection, program: .codex) }
+    }
+
     @objc private func newTab() {
-        if let selection = model.selection { model.openTab(in: selection) }
+        if let selection = model.selection { model.openTabBeside(in: selection) }
     }
 
     @objc private func closeTab() {

@@ -1,0 +1,3 @@
+plum: {'id': '35084', 'x': '198', 'y': '-1247', 'w': '1180', 'h': '760', 'onscreen': 'yes', 'display': '3', 'scale': '1', 'refresh': '75'}
+ghostty: {'id': '35096', 'x': '308', 'y': '-696', 'w': '900', 'h': '696', 'onscreen': 'yes', 'display': '3', 'scale': '1', 'refresh': '75'}
+orca: {'id': '35107', 'x': '198', 'y': '-1247', 'w': '1512', 'h': '949', 'onscreen': 'yes', 'display': '3', 'scale': '1', 'refresh': '75'}
