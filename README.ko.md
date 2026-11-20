@@ -1,10 +1,42 @@
-# Plum
+<div align="center">
 
-[English](README.md) · 한국어
+<img src="docs/assets/plum.svg" width="600" alt="터미널 창 안에서 기울어진 축으로 도는, 잎 달린 ASCII 자두">
+
+<h1>Plum</h1>
+
+<p><b>AI 코딩 에이전트 여러 개를, 각자의 git worktree에서 나란히.</b><br>
+Orca의 핵심만 남긴 가벼운 네이티브 macOS 앱.</p>
+
+<p>
+<a href="#설치"><img src="https://img.shields.io/badge/macOS-14%2B-1A1A1D?style=flat-square&logo=apple&logoColor=white" alt="macOS 14 이상"></a>
+<a href="#설치"><img src="https://img.shields.io/badge/Apple%20Silicon-arm64-1A1A1D?style=flat-square" alt="Apple Silicon"></a>
+<a href="#빌드와-실행"><img src="https://img.shields.io/badge/Swift-5.10-C58AF9?style=flat-square&logo=swift&logoColor=white" alt="Swift 5.10"></a>
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-C58AF9?style=flat-square" alt="MIT 라이선스"></a>
+</p>
+
+<p>
+<a href="#설치">설치</a> ·
+<a href="#빌드와-실행">빌드</a> ·
+<a href="#쓰는-법">쓰는 법</a> ·
+<a href="#단축키">단축키</a> ·
+<a href="#측정-결과">측정 결과</a> ·
+<a href="README.md">English</a>
+</p>
+
+</div>
 
 프로젝트(git 저장소)를 등록하고 워크스페이스를 추가하면 git worktree를 만들어 주고, 그 안에서 AI 코딩 에이전트를 돌릴 터미널까지 한 창에 담은 macOS 앱이다. Orca의 핵심만 남기고 네이티브로 가볍게 만드는 것이 목표다.
 
 상태: **0.1 (초기 공개판)**. 설계는 [`docs/superpowers/specs/2026-11-16-plum-design.md`](docs/superpowers/specs/2026-11-16-plum-design.md)에 있다.
+
+## 한눈에
+
+- **워크스페이스마다 worktree 하나.** 새 워크스페이스를 만들면 브랜치와 worktree를 만들고, `.env` 같은 파일을 복사하고, 설정 명령을 돌린 뒤 첫 탭에서 Claude나 Codex를 띄운다.
+- **에이전트 상태가 보이는 곳에.** 작업 중·입력 대기·완료·모니터링이 탭과 사이드바에 링으로 보이고, 손이 필요한 것은 맨 위로 모인다.
+- **앱을 꺼도 살아 있는 터미널.** 껐다 켜도 셸, 에이전트, 개발 서버가 그대로 돌고 화면과 스크롤백이 돌아온다.
+- **제대로 된 터미널.** 바탕은 libghostty-vt, 그리기는 Metal. 화면 분할, 찾기, 마우스 리포팅, OSC 8·52·133.
+- **변경과 PR.** 커밋 안 한 변경이나 브랜치 전체의 diff, 사이드바의 PR 상태와 체크, PR 만들기까지.
+- **작고 빠르다.** 터미널 하나일 때 메모리 37MB, 키 입력이 화면에 나오기까지 18.5ms. Orca는 721MB, 28.5ms다([측정 결과](#측정-결과)).
 
 ## 설치
 
@@ -241,6 +273,7 @@ Sources/PlumKit/UI/            App(메뉴·알림·종료 확인), MainWindow(�
                                Sheets(대화상자 내용), AppActions(확인이 필요한 동작), Controls(버튼·상태 표시·토스트), Theme
 Sources/Plum/                  진입점
 Vendor/                        libghostty-vt xcframework (build-vt.sh가 생성, git에는 넣지 않음)
+scripts/                       build-vt.sh, bundle.sh, release.sh. readme-plum.py는 README 맨 위 자두(docs/assets/plum.svg)를 그린다
 ```
 
 VT 해석과 화면 상태는 [libghostty-vt](https://libghostty.tip.ghostty.org/) 1.0.1(MIT)에 맡기고, 렌더러·글꼴·입력·pty는 직접 만들었다. 외부 의존성은 이것 하나다.

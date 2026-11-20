@@ -1,10 +1,42 @@
-# Plum
+<div align="center">
 
-English · [한국어](README.ko.md)
+<img src="docs/assets/plum.svg" width="600" alt="An ASCII plum with a leaf, turning on a tilted axis in a terminal window">
+
+<h1>Plum</h1>
+
+<p><b>AI coding agents side by side, each in a git worktree of its own.</b><br>
+A light, native macOS app that keeps the core of Orca.</p>
+
+<p>
+<a href="#install"><img src="https://img.shields.io/badge/macOS-14%2B-1A1A1D?style=flat-square&logo=apple&logoColor=white" alt="macOS 14 or later"></a>
+<a href="#install"><img src="https://img.shields.io/badge/Apple%20Silicon-arm64-1A1A1D?style=flat-square" alt="Apple Silicon"></a>
+<a href="#build-and-run"><img src="https://img.shields.io/badge/Swift-5.10-C58AF9?style=flat-square&logo=swift&logoColor=white" alt="Swift 5.10"></a>
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-C58AF9?style=flat-square" alt="MIT license"></a>
+</p>
+
+<p>
+<a href="#install">Install</a> ·
+<a href="#build-and-run">Build</a> ·
+<a href="#using-it">Using it</a> ·
+<a href="#keyboard">Keyboard</a> ·
+<a href="#performance">Performance</a> ·
+<a href="README.ko.md">한국어</a>
+</p>
+
+</div>
 
 A macOS app for running AI coding agents side by side. Add a project (a git repository), add a workspace, and Plum makes a git worktree for it and opens a terminal there, all in one window. It keeps the core of Orca and leaves the rest, as a light native app.
 
 Status: **0.1 (first public release)**. The design (in Korean) is in [`docs/superpowers/specs/2026-11-16-plum-design.md`](docs/superpowers/specs/2026-11-16-plum-design.md). The UI is in English and Korean, following the system language.
+
+## At a glance
+
+- **A worktree per workspace.** A new workspace gets a branch and a worktree, your `.env` files copied in, the setup command, then Claude or Codex in its first tab.
+- **Agents' state where you look.** Working, waiting, done and monitoring show as rings on tabs and in the sidebar; whatever needs you gathers at the top.
+- **Terminals that outlive the app.** Quit and start again: shells, agents and dev servers keep running, and screens and scrollback come back.
+- **A real terminal.** libghostty-vt underneath, drawn with Metal. Split panes, find, mouse reporting, OSC 8, 52 and 133.
+- **Changes and pull requests.** A diff of uncommitted work or the whole branch, PR state and checks in the sidebar, Create PR in one step.
+- **Small and quick.** 37 MB of memory with one terminal and 18.5 ms from key press to screen, against Orca's 721 MB and 28.5 ms ([Performance](#performance)).
 
 ## Install
 
@@ -185,6 +217,7 @@ Sources/PlumKit/UI/            App (menus, notifications, quitting), MainWindow 
                                Sheets (dialog content), AppActions (actions that ask first), Controls, Theme
 Resources/                     app icon, en.lproj and ko.lproj UI strings
 Vendor/                        libghostty-vt xcframework (made by build-vt.sh, not in git)
+scripts/                       build-vt.sh, bundle.sh, release.sh; readme-plum.py draws the README's plum (docs/assets/plum.svg)
 ```
 
 Terminal emulation is [libghostty-vt](https://libghostty.tip.ghostty.org/) 1.0.1 (MIT); the renderer, fonts, input and pty are Plum's own. That is the only dependency.
