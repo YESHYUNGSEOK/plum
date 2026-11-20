@@ -246,7 +246,17 @@ public final class AppModel {
     }
 
     func setPullRequests(_ found: [String: GitHub.PullRequest], of projectID: UUID) {
-        if pullRequests[projectID] != found { pullRequests[projectID] = found }
+        let before = pullRequests[projectID]
+        guard before != found else { return }
+        pullRequests[projectID] = found
+        // The first look after launch has nothing to compare with.
+        guard let before, let project = project(projectID) else { return }
+        for workspace in workspaces(in: project) {
+            let branch = branch(of: workspace)
+            guard let news = found[branch]?.news(since: before[branch]),
+                  !((NSApp?.isActive ?? false) && selection == workspace.id) else { continue }
+            notify?("\(project.name) · \(workspace.name)", news, workspace.id)
+        }
     }
 
     /// The branch a workspace is on: its own, or for a main checkout the one checked out now.
@@ -935,7 +945,10 @@ public final class AppModel {
 
     /// Brings a tab to the front, e.g. from a clicked notification.
     public func reveal(tab id: UUID) {
-        guard let tab = tab(id) else { return }
+        guard let tab = tab(id) else {
+            if workspace(id) != nil { select(id) } // a notification about a workspace (its pull request)
+            return
+        }
         navigate {
             selection = tab.workspaceID
             activateTab(id)

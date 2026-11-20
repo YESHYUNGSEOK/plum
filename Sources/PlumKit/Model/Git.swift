@@ -208,6 +208,24 @@ public enum GitHub {
         public let state: State
         public let checks: Checks
         public let url: URL
+
+        /// What changed since the last look, worth telling someone not watching.
+        public func news(since before: PullRequest?) -> String? {
+            guard let before, before.number == number else {
+                return state == .open || state == .draft ? String(localized: "PR #\(number)이 열렸습니다.") : nil
+            }
+            switch state {
+            case .merged where before.state != .merged: return String(localized: "PR #\(number)이 머지되었습니다.")
+            case .closed where before.state != .closed: return String(localized: "PR #\(number)이 닫혔습니다.")
+            default: break
+            }
+            guard checks != before.checks else { return nil }
+            switch checks {
+            case .passing: return String(localized: "PR #\(number)의 체크를 모두 통과했습니다.")
+            case .failing: return String(localized: "PR #\(number)의 체크가 실패했습니다.")
+            case .none, .pending: return nil
+            }
+        }
     }
 
     /// Apps started from Finder don't get the shell's PATH.

@@ -155,7 +155,9 @@ The workspace selected last is selected again at the next launch.
 
 ## Agent status
 
-Tabs and the sidebar show each agent's state as a ring: none is a faint ring, working a ring with a turning gap (blue), monitoring a faint ring with a pulse line drawn and wiped inside (teal), waiting for input a thick breathing ring (orange), done a filled disc with a check (green). Weight, fill, the line inside and motion tell them apart without color, and they stop moving with Reduce Motion on. Monitoring means Claude's turn is over but background work it started (a command, a monitor, a scheduled wakeup) will wake it again, judged from the Stop hook's `background_tasks` and `session_crons`; there is nothing to do, so it isn't listed under "Needs attention". Workspaces that are waiting or done gather at the top of the sidebar under "Needs attention", whatever their project, with chips counting the waiting and the done apart. When a tab you aren't looking at starts waiting or finishes, the Dock icon shows a count and bounces once.
+Tabs and the sidebar show each agent's state as a ring: none is a faint ring, working a ring with a turning gap (blue), monitoring a faint ring with a pulse line drawn and wiped inside (teal), waiting for input a thick breathing ring (orange), done a filled disc with a check (green). Weight, fill, the line inside and motion tell them apart without color, and they stop moving with Reduce Motion on. Monitoring means Claude's turn is over but background work it started (a command, a monitor, a scheduled wakeup) will wake it again, judged from the Stop hook's `background_tasks` and `session_crons`; there is nothing to do, so it isn't listed under "Needs attention". Workspaces that are waiting or done gather at the top of the sidebar under "Needs attention", whatever their project, with chips counting the waiting and the done apart. When a tab you aren't looking at starts waiting or finishes, the Dock icon shows a count and bounces once. A macOS notification says which workspace it is (a click on it opens the tab), and so does news of a workspace's pull request (opened, checks passed or failed, merged, closed). Plum's icon is the README's plum on a dark square, and while Plum runs it turns in the Dock (standing still with Reduce Motion on).
+
+Notifications in builds without an Apple-issued certificate (what `bundle.sh` makes): macOS refuses them the current way, even to a self-signed build (checked on macOS 26), so Plum falls back to the older one. They show under Plum's name but without its icon. A build signed with a Developer ID or Apple Development certificate takes the current way.
 
 The state comes in three ways:
 
@@ -179,10 +181,10 @@ The details, with dates and numbers, are in the [Korean README](README.ko.md#확
 
 - **Checked by running it**: worktree creation, file copying, archive/restore/delete with the data-loss checks (automated tests); rendering of styles, colors, Korean and emoji, vim and Claude Code screens; key encoding; agent status from hooks, OSC 7501 and the bell; drawing only while visible; every dialog, the quit and paste confirmations, links, and every shortcut in the table above, sent through the app's real event path; the English UI; a hardened-runtime build.
 - **Dialogs no longer stall the app**: macOS sheets held the main thread about 0.3 s on every open and close (terminal output froze meanwhile). Dialogs are now drawn in the window and animated by Core Animation: the longest stall went from 354 ms to 52 ms (new workspace palette), 331 → 40 ms (settings) and 316 → 18 ms (delete confirmation), measured under a tab title changing ten times a second.
-- **Also checked**: the Korean input-method path (the calls an input method makes while composing and committing), double/triple click, drag selection, wheel scrolling, the screen right after switching workspaces (70 captures), and the Dock badge standing in for refused notifications.
+- **Also checked**: the Korean input-method path (the calls an input method makes while composing and committing), double/triple click, drag selection, wheel scrolling, the screen right after switching workspaces (70 captures), the Dock badge, and (2026-11-20, in a test copy of the app) notifications for finished and waiting tabs through the older API, only the newest per tab staying in Notification Center, and the Dock plum turning. Pull request notifications have automated tests only.
 - **Sidebar details (2026-11-19)**: changed-line counts, pull request parsing, folded projects, tab titles, port detection and descriptor isolation have automated tests (40 in all); clicks, drags, menus and renaming were checked in the app with synthesized events, as were Plum's own right-click menus (workspace, project, main checkout, tab; submenus, Esc), renaming a tab by double-clicking it (the window keeps its size and place), and agent tabs' permission flags and trusted folders (against a temporary config folder). Trusting was also checked on a copy of a real `~/.claude.json`: apart from the added keys, the content came back the same. Not seen: whether a real Claude or Codex then skips its trust prompt. A bug from before was fixed: new shells inherited every descriptor the app had open, so a git command running as a tab opened kept the app waiting for its output forever.
 - **Terminals that outlive the app (2026-11-19)**: automated tests (44 in all) and quitting and relaunching the app with a stand-in agent and a web server running: everything listed above came back; the host used 4 MB with seven tabs attached. Heavy output through the host runs at 0.83× a direct pty (152 vs 183 MB/s).
-- **Not checked yet**: quitting and relaunching with a real Claude or Codex running, the sidebar with a real mouse (pull request badges were checked against real `gh` output from a clone of `cli/cli`), real Claude and Codex tab titles (checked with stand-in processes), typing Korean through the real macOS input method (Return while composing in particular), a real trackpad and mouse (all checks used synthesized events), macOS notifications (refused for ad-hoc signed builds), Developer ID signing and notarization (no certificate here), Codex integration.
+- **Not checked yet**: quitting and relaunching with a real Claude or Codex running, the sidebar with a real mouse (pull request badges were checked against real `gh` output from a clone of `cli/cli`), real Claude and Codex tab titles (checked with stand-in processes), typing Korean through the real macOS input method (Return while composing in particular), a real trackpad and mouse (all checks used synthesized events), Developer ID signing and notarization (no certificate here), Codex integration.
 
 ## Performance
 
@@ -201,6 +203,8 @@ Measured against Ghostty 1.4.0 (the latest) on the same Mac (M4 Pro, external 75
 | Memory, 10 terminals | 49 MB | 214 MB | 5 each |
 | Idle CPU (30 s) | 1 ms | 107 ms | 4 each |
 
+The Dock icon has turned since 2026-11-20, after these were measured: idle, Plum then uses about 500 ms of CPU per 30 s, and the Dock about 680 ms more to draw it (8 frames a second, measured on a test copy).
+
 - Ghostty 1.4.0 is faster than Plum on plain text, scrolling and TUI redraws; Plum is faster on dense colors, Unicode and cursor movement. Plum's plain-text limit is in Plum, not in the pty; where exactly is not yet known.
 - Latency excludes keyboard and panel response.
 
@@ -216,9 +220,9 @@ Sources/PlumKit/Terminal/      TerminalSession (pty, VT state), TerminalRenderer
 Sources/PlumKit/Model/         Models and Store, Git, WorkspaceService, StatusServer, AppModel, DebugCommands
 Sources/PlumKit/UI/            App (menus, notifications, quitting), MainWindow (window, tab bar, dialogs), Sidebar,
                                Sheets (dialog content), AppActions (actions that ask first), Controls, Theme
-Resources/                     app icon, en.lproj and ko.lproj UI strings
+Resources/                     app icon (made by scripts/make-icon.sh), en.lproj and ko.lproj UI strings
 Vendor/                        libghostty-vt xcframework (made by build-vt.sh, not in git)
-scripts/                       build-vt.sh, bundle.sh, release.sh; readme-plum.py draws the README's plum (docs/assets/plum.svg)
+scripts/                       build-vt.sh, bundle.sh, release.sh; readme-plum.py draws the README's plum (docs/assets/plum.svg) and the Dock's (AsciiPlumFrames.swift); make-icon.sh makes the app icon
 ```
 
 Terminal emulation is [libghostty-vt](https://libghostty.tip.ghostty.org/) 1.0.1 (MIT); the renderer, fonts, input and pty are Plum's own. That is the only dependency.

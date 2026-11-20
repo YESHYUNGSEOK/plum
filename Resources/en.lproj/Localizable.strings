@@ -296,3 +296,8 @@
 "확인 필요: 입력 대기 %lld개, 완료 %lld개" = "Needs attention: %lld waiting, %lld done";
 "확인 필요로 이동" = "Go to Needs Attention";
 "흑연" = "Graphite";
+"PR #%lld이 열렸습니다." = "PR #%lld was opened.";
+"PR #%lld이 머지되었습니다." = "PR #%lld was merged.";
+"PR #%lld이 닫혔습니다." = "PR #%lld was closed.";
+"PR #%lld의 체크를 모두 통과했습니다." = "PR #%lld passed all its checks.";
+"PR #%lld의 체크가 실패했습니다." = "PR #%lld failed a check.";

@@ -14,7 +14,8 @@ public func runApp() {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuItemValidation, UNUserNotificationCenterDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuItemValidation, UNUserNotificationCenterDelegate,
+    NSUserNotificationCenterDelegate {
     private let model = AppModel()
     private var windowController: MainWindowController!
     private let debug = ProcessInfo.processInfo.environment["PLUM_DEBUG"] == "1"
@@ -59,6 +60,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         notifications?.delegate = self
         // The Dock badge needs no permission, unlike notifications.
         updateBadge()
+        // While Plum runs, its Dock icon is the README's plum turning.
+        let tile = NSApp.dockTile
+        dockPlum.frame = NSRect(origin: .zero, size: tile.size)
+        dockPlum.onFrame = { tile.display() }
+        tile.contentView = dockPlum
+        dockPlum.spinning = true
+        tile.display()
         model.start(debug: debug)
         if debug {
             // Scripted runs must not grab the keyboard from whoever is
@@ -142,6 +150,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     /// What happened to each notification, for scripted checks.
     private var notificationLog: [String] = []
+    private let dockPlum = DockPlumView()
     private func updateBadge() {
         withObservationTracking {
             let pending = model.statuses.values.filter { $0 == .waiting || $0 == .done }.count
@@ -164,6 +173,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     self.notificationLog.append(granted ? "posted: \(title)" : "not allowed\(error.map { " (\($0.localizedDescription))" } ?? "")")
+                    if !granted { self.postLegacy(title: title, body: body, tab: tab) }
                 }
             }
             guard granted else { return }
@@ -174,6 +184,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             content.userInfo = ["tab": tab.uuidString]
             // One notification per tab: a newer state replaces the older one.
             notifications.add(UNNotificationRequest(identifier: tab.uuidString, content: content, trigger: nil))
+        }
+    }
+
+    /// macOS refuses the current API to apps without an Apple-issued
+    /// certificate (ad-hoc and self-signed builds, as bundle.sh makes; checked
+    /// on macOS 26). The older one still shows them, under Plum's name but
+    /// without its icon. ponytail: deprecated API; a signed build takes the path above.
+    @available(macOS, deprecated: 11)
+    private func postLegacy(title: String, body: String, tab: UUID) {
+        let center = NSUserNotificationCenter.default
+        center.delegate = self
+        // A newer state replaces the older one. Not through `identifier`: a
+        // notification carrying one isn't shown at all (macOS 26).
+        for old in center.deliveredNotifications where old.userInfo?["tab"] as? String == tab.uuidString {
+            center.removeDeliveredNotification(old)
+        }
+        let note = NSUserNotification()
+        note.userInfo = ["tab": tab.uuidString]
+        note.title = title
+        note.informativeText = body
+        note.soundName = NSUserNotificationDefaultSoundName
+        center.deliver(note)
+        notificationLog.append("posted (legacy): \(title)")
+    }
+
+    // Shown even while Plum is in front: they are about tabs out of sight.
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound])
+    }
+
+    @available(macOS, deprecated: 11)
+    nonisolated func userNotificationCenter(_ center: NSUserNotificationCenter, shouldPresent notification: NSUserNotification) -> Bool {
+        true
+    }
+
+    @available(macOS, deprecated: 11)
+    nonisolated func userNotificationCenter(_ center: NSUserNotificationCenter, didActivate notification: NSUserNotification) {
+        let id = (notification.userInfo?["tab"] as? String).flatMap(UUID.init)
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                guard let id else { return }
+                NSApp.activate(ignoringOtherApps: true)
+                self.model.reveal(tab: id)
+            }
         }
     }
 

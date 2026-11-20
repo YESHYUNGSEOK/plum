@@ -13,7 +13,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$(swift build -c release --show-bin-path)/Plum" "$APP/Contents/MacOS/Plum"
 strip -x "$APP/Contents/MacOS/Plum"
 cp Vendor/LICENSE-ghostty "$APP/Contents/Resources/LICENSE-ghostty.txt"
-# Resources/AppIcon.icns is prebuilt from Resources/AppIcon.svg (1024px PNG → iconutil).
+# Resources/AppIcon.icns is prebuilt by scripts/make-icon.sh.
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 # UI text: Korean is the source language, English is translated. Other
 # languages fall back to English (the development region below).

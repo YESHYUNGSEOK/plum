@@ -85,6 +85,36 @@ final class WorkspaceDetailsTests: XCTestCase {
         XCTAssertEqual(TabTitle.label(tab), programs)
     }
 
+    func testPullRequestChangesAreToldAfterTheFirstLook() throws {
+        var state = AppState()
+        let project = Project(name: "alpha", path: "/nonexistent/alpha")
+        let one = Workspace(projectID: project.id, name: "one", branch: "x/one", path: "/nonexistent/one")
+        state.projects = [project]
+        state.workspaces = [one]
+        try Store(directory: directory).save(state)
+        let model = AppModel(store: Store(directory: directory))
+        var told: [(title: String, body: String, id: UUID)] = []
+        model.notify = { told.append(($0, $1, $2)) }
+        func look(_ state: GitHub.PullRequest.State, _ checks: GitHub.PullRequest.Checks, number: Int = 9) {
+            let pr = GitHub.PullRequest(number: number, state: state, checks: checks, url: URL(string: "https://github.com/o/r/pull/\(number)")!)
+            model.setPullRequests(["x/one": pr], of: project.id)
+        }
+
+        look(.open, .pending)
+        XCTAssertTrue(told.isEmpty, "the first look has nothing to compare with")
+        look(.open, .failing)
+        look(.open, .pending)
+        look(.open, .passing)
+        look(.merged, .passing)
+        look(.merged, .passing)
+        look(.open, .none, number: 12)
+        XCTAssertEqual(told.map(\.body), [
+            "PR #9의 체크가 실패했습니다.", "PR #9의 체크를 모두 통과했습니다.", "PR #9이 머지되었습니다.", "PR #12이 열렸습니다.",
+        ])
+        XCTAssertEqual(told.first?.title, "alpha · one")
+        XCTAssertEqual(told.first?.id, one.id, "a click selects the workspace")
+    }
+
     func testFoldedProjectsLeaveTheOrderAndAreSaved() throws {
         var state = AppState()
         let a = Project(name: "alpha", path: "/nonexistent/alpha")

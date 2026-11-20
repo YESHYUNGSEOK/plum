@@ -115,7 +115,7 @@ struct SidebarView: View {
         // moves the window.
         .overlay(alignment: .top) {
             GeometryReader { proxy in
-                Text(verbatim: "Plum")
+                Text(verbatim: "plum")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Theme.secondary)
                     .frame(maxWidth: .infinity, alignment: .trailing)

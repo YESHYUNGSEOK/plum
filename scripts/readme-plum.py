@@ -30,7 +30,9 @@ RAMP = " .'`,-:;~=+*!ilrcvxzsoaenuLJTYCOQ0ZUXmwpqdbkhKAMW#B8%&@"
 EDGE = " ()/\\|_-.,'`<>[]:;~^"
 FLOOR = ".,::;"
 CHARS = "".join(dict.fromkeys(RAMP + EDGE))
-OUT = Path(__file__).resolve().parent.parent / "docs/assets/plum.svg"
+ROOT = Path(__file__).resolve().parent.parent
+OUT = ROOT / "docs/assets/plum.svg"
+SWIFT_OUT = ROOT / "Sources/PlumKit/UI/AsciiPlumFrames.swift"   # the small one for the Dock icon
 
 BACK, BAR_FILL, LINE, TITLE = "#141417", "#1E1E22", "#2C2C32", "#8E8E99"
 RAMPS = {  # dark to light; the last skin color is the highlight
@@ -96,6 +98,7 @@ def parts(q):
 PITCH, ROLL = 0.22, -0.2            # the axis leans toward the viewer and to the right
 CENTER = np.array([0.0, 0.08, 0.0])
 GROUND = -1.2
+SHADOW = True
 EYE, LOOK = np.array([0, 1.9, 7.4]), np.array([0, 0.05, 0])
 VIEW_H = 3.45                        # world height of the grid at LOOK
 L_KEY, L_FILL = norm([-0.55, 0.8, 0.55]), norm([0.9, 0.1, 0.35])
@@ -205,6 +208,8 @@ def shade(theta, ro, rd):
     spec[hit] = np.where(m == 1, hl, 0)
     mat[hit] = m
 
+    if not SHADOW:
+        return mat, lum, spec
     # A soft shadow on an unseen floor under it.
     floor = np.flatnonzero(~hit & (rd[:, 1] < 0))
     g = ro[floor] + rd[floor] * ((GROUND - ro[floor, 1]) / rd[floor, 1])[:, None]
@@ -348,20 +353,45 @@ def preview(frames, path, picks):
     sheet.save(path)
 
 
+def render(count, ink, dense):
+    ro, rd = rays()
+    return [to_text(*shade(0.9 + 2 * math.pi * f / count, ro, rd), ink, dense) for f in range(count)]
+
+
+def swift(frames):
+    """The frames as Swift: a line per row, its characters, a tab, and a
+    palette index per character ('.' for none)."""
+    colors = sorted({c for fr in frames for row in fr for _, c in row if c})
+    code = {c: "0123456789abcdefghijklmnopqrstuvwxyz"[i] for i, c in enumerate(colors)}
+    body = "\n".join("".join(ch for ch, _ in row) + "\t" + "".join(code[c] if c else "." for _, c in row)
+                     for fr in frames for row in fr)
+    assert '"""###' not in body and "\\###" not in body
+    palette = ", ".join("0x" + c[1:] for c in colors)
+    return f"""// Made by scripts/readme-plum.py; don't edit.
+extension AsciiPlum {{
+    static let shared = AsciiPlum(cols: {COLS}, rows: {ROWS}, palette: [{palette}], text: ###\"\"\"
+{body}
+\"\"\"###)
+}}
+"""
+
+
 def main():
+    global COLS, ROWS, VIEW_H, LOOK, SHADOW
     ink = glyphs()
     dense = ramp(ink)
     print("ramp:", "".join(CHARS[i] for i in dense))
-    ro, rd = rays()
-    frames = []
-    for f in range(FRAMES):
-        theta = 0.9 + 2 * math.pi * f / FRAMES
-        frames.append(to_text(*shade(theta, ro, rd), ink, dense))
+    frames = render(FRAMES, ink, dense)
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(svg(frames))
     print(f"{OUT} {OUT.stat().st_size / 1024:.0f} KB")
     if len(sys.argv) > 1:
         preview(frames, sys.argv[1], [int(a) for a in sys.argv[2:]] or [0, FRAMES // 4])
+
+    # Small, framed tight and without the floor, for icon sizes.
+    COLS, ROWS, VIEW_H, LOOK, SHADOW = 28, 13, 2.8, np.array([0, 0.2, 0]), False
+    SWIFT_OUT.write_text(swift(render(36, ink, dense)))
+    print(f"{SWIFT_OUT} {SWIFT_OUT.stat().st_size / 1024:.0f} KB")
 
 
 if __name__ == "__main__":
