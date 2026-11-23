@@ -1,0 +1,49 @@
+README.ko.md
+  s_bf0ed424735551::t_35d193a431479b 82
+README.md
+  s_bf0ed424735551::t_b0eb7b858a7b4d 86
+Resources/en.lproj/Localizable.strings
+  s_bf0ed424735551::t_cb4f5373c9b3b5 341-346
+Sources/PlumKit/Model/AppModel.swift
+  s_bf0ed424735551::t_84bcaf46939d75 227-228,244,966-970,974-975,979-980,985-986,994,997,1211-1215,1232-1244,1294,1307-1313
+Sources/PlumKit/Model/DebugCommands.swift
+  s_bf0ed424735551::t_394c8c053c9eae 32-33
+Sources/PlumKit/Model/Models.swift
+  s_bf0ed424735551::t_cadd7e215e9ef6 6,8-11
+Sources/PlumKit/UI/App.swift
+  s_bf0ed424735551::t_604aa4d2c1309e 505-507
+Sources/PlumKit/UI/AppActions.swift
+  s_bf0ed424735551::t_6c842b8f4bf2ab 11,14-24,61-63,88,111-124
+Sources/PlumKit/UI/Sheets.swift
+  s_bf0ed424735551::t_ffb7c9192b7faa 323,331,360-372,374-375,377-386,440,533-535,537-550
+Sources/PlumKit/UI/Sidebar.swift
+  s_bf0ed424735551::t_94d1b887cc07cf 357-359,365-367,399-403,412-413,430-432,439
+Tests/PlumKitTests/FolderProjectTests.swift
+  s_74ed3cfc6ccc40::t_77ad4f558c910d 1-100
+docs/superpowers/specs/2026-11-16-plum-design.md
+  s_bf0ed424735551::t_880a38732a4cc6 82
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b530d12dba43034e50f78e22125ca061ad6345e8",
+  "prompts": {},
+  "sessions": {
+    "s_74ed3cfc6ccc40": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3a39ebac-5654-415f-88af-28724abff585",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    },
+    "s_bf0ed424735551": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5ac29605-eee3-4cf1-9703-b5fa4086d055",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    }
+  }
+}
