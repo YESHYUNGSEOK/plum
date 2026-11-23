@@ -153,6 +153,74 @@ final class OrcaImportTests: XCTestCase {
         }
     }
 
+    // MARK: Into Plum
+
+    @MainActor
+    private func model() -> AppModel {
+        AppModel(store: Store(directory: scratch.appendingPathComponent("state")))
+    }
+
+    private func addWorktree(_ repo: String, _ folder: String, branch: String) throws -> String {
+        let path = scratch.appendingPathComponent(folder).path
+        try Git.run(["worktree", "add", "-q", "-b", branch, path], in: repo)
+        return path
+    }
+
+    @MainActor
+    func testACatalogBecomesProjectsAndWorkspaces() async throws {
+        let (repo, worktree) = try gitRepo()
+        _ = try addWorktree(repo, "by-hand", branch: "feat/y")
+        let root = try XCTUnwrap(Git.repositoryRoot(of: repo))
+        let catalog = OrcaImport.Catalog(
+            repos: [OrcaImport.Repo(id: "r1", path: root, name: "Alpha")],
+            worktrees: [OrcaImport.Worktree(repoID: "r1", path: worktree, branch: "feat/x", name: "Orca name")])
+        let model = model()
+
+        let result = await model.importFromOrca(catalog)
+        XCTAssertEqual(model.state.projects.map(\.name), ["Alpha"])
+        XCTAssertEqual(model.state.workspaces.map(\.name), ["Orca name", "by-hand"], "the rest of git's worktrees come with it")
+        XCTAssertEqual(model.state.workspaces.map(\.branch), ["feat/x", "feat/y"])
+        XCTAssertEqual(result, OrcaImport.Result(projects: 1, workspaces: 2))
+
+        let again = await model.importFromOrca(catalog)
+        XCTAssertEqual(again, OrcaImport.Result())
+        XCTAssertEqual(model.state.workspaces.count, 2)
+    }
+
+    @MainActor
+    func testAnExistingProjectKeepsItsName() async throws {
+        let (repo, _) = try gitRepo()
+        let root = try XCTUnwrap(Git.repositoryRoot(of: repo))
+        let model = model()
+        model.addProject(at: repo)
+        let deadline = Date().addingTimeInterval(5)
+        while model.state.workspaces.isEmpty, Date() < deadline { try await Task.sleep(nanoseconds: 50_000_000) }
+        var project = try XCTUnwrap(model.state.projects.first)
+        project.name = "mine"
+        model.update(project)
+        let later = try addWorktree(repo, "later", branch: "feat/z")
+
+        let result = await model.importFromOrca(OrcaImport.Catalog(
+            repos: [OrcaImport.Repo(id: "r1", path: root, name: "Alpha")],
+            worktrees: [OrcaImport.Worktree(repoID: "r1", path: later, branch: "feat/z", name: "Z")]))
+        XCTAssertEqual(model.state.projects.map(\.name), ["mine"])
+        XCTAssertTrue(model.state.workspaces.contains { $0.name == "Z" && $0.branch == "feat/z" })
+        XCTAssertEqual(result, OrcaImport.Result(projects: 0, workspaces: 1))
+    }
+
+    @MainActor
+    func testNamesThatClashGetASuffix() async throws {
+        let (repo, worktree) = try gitRepo()
+        let other = try addWorktree(repo, "repo-y", branch: "feat/y")
+        let root = try XCTUnwrap(Git.repositoryRoot(of: repo))
+        let model = model()
+        await model.importFromOrca(OrcaImport.Catalog(
+            repos: [OrcaImport.Repo(id: "r1", path: root, name: "Alpha")],
+            worktrees: [OrcaImport.Worktree(repoID: "r1", path: worktree, branch: "feat/x", name: "X"),
+                        OrcaImport.Worktree(repoID: "r1", path: other, branch: "feat/y", name: "X")]))
+        XCTAssertEqual(model.state.workspaces.map(\.name), ["X", "X-2"])
+    }
+
     func testOutputPlumDoesNotKnowImportsNothing() {
         let unknown: [(Data, Data)] = [
             (Data("not json".utf8), worktrees("")),

@@ -974,13 +974,7 @@ public final class AppModel {
             select(existing.id)
             return
         }
-        var name = (root as NSString).lastPathComponent
-        var suffix = 2
-        while state.projects.contains(where: { $0.name == name }) {
-            name = "\((root as NSString).lastPathComponent)-\(suffix)"
-            suffix += 1
-        }
-        let project = Project(name: name, path: root)
+        let project = Project(name: uniqueProjectName((root as NSString).lastPathComponent), path: root)
         state.projects.append(project)
         save()
         select(project.id)
@@ -1018,13 +1012,7 @@ public final class AppModel {
             guard let branch = worktree.branch, !WorkspaceService.samePath(worktree.path, project.path),
                   FileManager.default.fileExists(atPath: worktree.path),
                   !state.workspaces.contains(where: { WorkspaceService.samePath($0.path, worktree.path) }) else { continue }
-            let folder = (worktree.path as NSString).lastPathComponent
-            var name = folder
-            var suffix = 2
-            while state.workspaces.contains(where: { $0.projectID == projectID && $0.name == name }) {
-                name = "\(folder)-\(suffix)"
-                suffix += 1
-            }
+            let name = uniqueWorkspaceName((worktree.path as NSString).lastPathComponent, in: projectID)
             state.workspaces.append(Workspace(projectID: projectID, name: name, branch: branch, path: worktree.path))
             added += 1
         }
@@ -1033,6 +1021,67 @@ public final class AppModel {
             refreshPullRequests()
         }
         return added
+    }
+
+    /// What Orca had (`OrcaImport.load`): its repositories as projects (one
+    /// Plum already has stays as it is), their worktrees as workspaces with
+    /// Orca's names, then for a new project the rest of git's worktrees, as
+    /// when a project is added by hand. Nothing on disk changes.
+    @discardableResult
+    func importFromOrca(_ catalog: OrcaImport.Catalog) async -> OrcaImport.Result {
+        var result = OrcaImport.Result()
+        var projectOf: [String: UUID] = [:] // Orca's repository id → project
+        var added: [Project] = []
+        for repo in catalog.repos {
+            if let existing = state.projects.first(where: { WorkspaceService.samePath($0.path, repo.path) }) {
+                projectOf[repo.id] = existing.id
+                continue
+            }
+            let project = Project(name: uniqueProjectName(repo.name), path: repo.path)
+            state.projects.append(project)
+            projectOf[repo.id] = project.id
+            added.append(project)
+        }
+        for worktree in catalog.worktrees {
+            guard let projectID = projectOf[worktree.repoID],
+                  !state.workspaces.contains(where: { WorkspaceService.samePath($0.path, worktree.path) }) else { continue }
+            let name = uniqueWorkspaceName(worktree.name, in: projectID)
+            state.workspaces.append(Workspace(projectID: projectID, name: name, branch: worktree.branch, path: worktree.path))
+            result.workspaces += 1
+        }
+        result.projects = added.count
+        guard result.projects + result.workspaces > 0 else { return result }
+        save()
+        // Imported into an empty window: show what came.
+        if selection == nil, let first = added.first { select(first.id) }
+        for project in added {
+            findIcon(of: project)
+            result.workspaces += await importWorktrees(of: project.id)
+        }
+        refreshPullRequests()
+        return result
+    }
+
+    /// `base`, or `base-2`, `base-3`… when a project already has that name.
+    private func uniqueProjectName(_ base: String) -> String {
+        var name = base
+        var suffix = 2
+        while state.projects.contains(where: { $0.name == name }) {
+            name = "\(base)-\(suffix)"
+            suffix += 1
+        }
+        return name
+    }
+
+    /// The same among one project's workspaces.
+    private func uniqueWorkspaceName(_ base: String, in projectID: UUID) -> String {
+        var name = base
+        var suffix = 2
+        while state.workspaces.contains(where: { $0.projectID == projectID && $0.name == name }) {
+            name = "\(base)-\(suffix)"
+            suffix += 1
+        }
+        return name
     }
 
     /// Forgets a project. Nothing on disk is touched.
