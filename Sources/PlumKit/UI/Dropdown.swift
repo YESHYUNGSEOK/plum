@@ -236,15 +236,18 @@ final class DropdownPanel: NSPanel {
         host.sizingOptions = [.intrinsicContentSize]
         self.host = host
         let size = host.fittingSize
-        host.frame = NSRect(origin: .zero, size: size)
-        contentView = host
 
         var frame = NSRect(x: topLeft.x, y: topLeft.y - size.height, width: size.width, height: size.height)
         if let screen = parent.screen?.visibleFrame {
             frame.origin.x = min(max(frame.minX, screen.minX + 4), screen.maxX - size.width - 4)
             if frame.minY < screen.minY { frame.origin.y = above } // no room below: above
         }
+        // Sized before the list goes in, and laid out before it fades in:
+        // a list first laid out in the empty window's zero size would fly
+        // into place from the corner as part of the fade.
         setFrame(frame, display: false)
+        contentView = host
+        host.layoutSubtreeIfNeeded()
         parent.addChildWindow(self, ordered: .above)
         makeKeyAndOrderFront(nil)
         // The list fades in, not the window: a window's own fade stalls
