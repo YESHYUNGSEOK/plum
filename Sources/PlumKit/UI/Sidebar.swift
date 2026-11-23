@@ -110,22 +110,6 @@ struct SidebarView: View {
             .padding(.horizontal, 22)
             .frame(height: 46)
         }
-        // The app's name in the title bar strip, level with the window
-        // buttons at the other end. It takes no clicks: a drag there still
-        // moves the window.
-        .overlay(alignment: .top) {
-            GeometryReader { proxy in
-                Text(verbatim: "plum")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Theme.secondary)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .padding(.trailing, 16)
-                    .frame(height: proxy.safeAreaInsets.top)
-                    .offset(y: -proxy.safeAreaInsets.top)
-            }
-            .allowsHitTesting(false)
-            .accessibilityHidden(true) // the window's own title says it
-        }
         // As wide as the window makes it (the user can drag its edge). While
         // it folds away it keeps a minimum width and is clipped, not squeezed.
         .frame(minWidth: 180, maxWidth: .infinity, alignment: .leading)
@@ -133,11 +117,12 @@ struct SidebarView: View {
         .id(model.state.settings.accent)
     }
 
-    /// Changes whenever a row appears, disappears or moves.
+    /// Changes whenever a row appears, disappears or moves, a tab's line included.
     private var layoutKey: [UUID] {
-        let attention = model.state.projects.flatMap { model.workspaces(in: $0) }
-            .filter { [.waiting, .done].contains(model.status(of: $0.id)) }.map(\.id)
-        return attention + model.state.workspaces.map(\.id) + model.pending.map(\.id)
+        let shown = model.state.projects.flatMap { model.workspaces(in: $0) }
+        let attention = shown.filter { [.waiting, .done].contains(model.status(of: $0.id)) }.map(\.id)
+        let tabs = shown.flatMap { model.tabs[$0.id] ?? [] }.map(\.id)
+        return attention + model.state.workspaces.map(\.id) + model.pending.map(\.id) + tabs
     }
 }
 
@@ -503,6 +488,7 @@ private struct WorkspaceRow: View {
                             isActive: isSelected && model.activeTabs[workspace.id] == tab.id,
                             show: { model.reveal(tab: tab.id) },
                             close: { AppActions.closeTab(model, tab.id) })
+                        .transition(.opacity)
                     }
                     if tabs.count > Self.shownTabs {
                         let hidden = tabs.dropFirst(Self.shownTabs)
@@ -511,6 +497,7 @@ private struct WorkspaceRow: View {
                             // What the folded tabs are doing, so a waiting one isn't missed.
                             status: hidden.map { model.statuses[$0.id] ?? .idle }.max { $0.urgency < $1.urgency } ?? .idle
                         ) { showsAllTabs.toggle() }
+                        .transition(.opacity)
                     }
                 }
                 // Under the name: past the state mark and the gap after it.

@@ -5,6 +5,11 @@ import UserNotifications
 /// Starts Plum. Never returns.
 @MainActor
 public func runApp() {
+    // A write to a pipe or socket whose reader is gone fails with EPIPE, which
+    // every write here handles, instead of ending the app without a trace
+    // (a script that closed its connection before reading the answer to a
+    // debug command did that). The terminal host does the same.
+    signal(SIGPIPE, SIG_IGN)
     let app = NSApplication.shared
     let delegate = AppDelegate()
     app.delegate = delegate
@@ -17,6 +22,12 @@ public func runApp() {
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuItemValidation, UNUserNotificationCenterDelegate,
     NSUserNotificationCenterDelegate {
     private let model = AppModel()
+    /// Keeps macOS from putting Plum to sleep (App Nap) while its window is
+    /// covered: the terminals behind it keep running agents and builds, and
+    /// napped, their output was read and parsed 2-6x more slowly (scrolling
+    /// in a region 16-22 MB/s instead of 108-113). Idle, Plum does almost
+    /// nothing anyway; the Mac may still sleep.
+    private var awake: NSObjectProtocol?
     private var windowController: MainWindowController!
     private let debug = ProcessInfo.processInfo.environment["PLUM_DEBUG"] == "1"
     /// Notifications need a real app bundle; a bare `swift run` binary has none.
@@ -25,6 +36,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Read off the main thread while the window is set up (2 ms), not at the first frame.
+        DispatchQueue.global(qos: .userInitiated).async { _ = CellLayout.current }
+        awake = ProcessInfo.processInfo.beginActivity(
+            options: .userInitiatedAllowingIdleSystemSleep, reason: "Terminals keep running while the window is covered")
         NSApp.mainMenu = buildMenu()
         // Plum is dark, whatever the system is.
         NSApp.appearance = NSAppearance(named: .darkAqua)
@@ -56,6 +71,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         model.debugToggleSidebar = { [weak self] in self?.windowController.toggleSidebar() }
         model.debugTraceDialogClose = { [weak self] done in self?.windowController.traceDialogClose(done) }
         model.debugNotificationStatus = { [weak self] in self?.notificationLog.joined(separator: "; ") ?? "" }
+        model.debugInstallUpdate = { zip, signature, version in
+            do {
+                let app = try Updates.install(try Data(contentsOf: zip), signature: try Data(contentsOf: signature), version: version)
+                DispatchQueue.main.async { _ = AppActions.relaunch(app) }
+                return "installed " + app.path
+            } catch {
+                return "failed: " + error.localizedDescription
+            }
+        }
         model.notify = { [weak self] title, body, tab in self?.post(title: title, body: body, tab: tab) }
         notifications?.delegate = self
         // The Dock badge needs no permission, unlike notifications.

@@ -144,6 +144,9 @@ extension AppModel {
         case "error": // shows the error toast; empty clears it
             errorMessage = argument.isEmpty ? nil : argument
             return "ok"
+        case "update-local": // zip|signature file|version: installs it as an update would, and restarts
+            guard fields.count == 3, let install = debugInstallUpdate else { return "bad arguments" }
+            return install(URL(fileURLWithPath: fields[0]), URL(fileURLWithPath: fields[1]), fields[2])
         case "quit": // as ⌘Q
             DispatchQueue.main.async { NSApp.terminate(nil) }
             return "ok"

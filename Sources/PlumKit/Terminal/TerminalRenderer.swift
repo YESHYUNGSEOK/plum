@@ -149,6 +149,9 @@ final class TerminalRenderer {
     private var bufferIndex = 0
     private var rowIterator: GhosttyRenderStateRowIterator?
     private var rowCells: GhosttyRenderStateRowCells?
+    /// A grapheme cluster's codepoints, read into the same memory every time.
+    private static let clusterCapacity = 16
+    private let codepoints = UnsafeMutablePointer<UInt32>.allocate(capacity: clusterCapacity)
 
     /// Padding around the grid, in pixels.
     var padding = 8
@@ -168,6 +171,7 @@ final class TerminalRenderer {
     }
 
     deinit {
+        codepoints.deallocate()
         ghostty_render_state_row_cells_free(rowCells)
         ghostty_render_state_row_iterator_free(rowIterator)
     }
@@ -254,11 +258,17 @@ final class TerminalRenderer {
     }
 
     private func buildRow(_ y: Int, colors: Palette, cursor: CursorState) {
+        let atlas = atlas
         let m = atlas.metrics
         let top = padding + y * m.cellHeight
+        // Rebuilt in place: taken out of `rows`, its arrays are uniquely
+        // held and keep their capacity instead of being allocated again.
         var row = Row()
-        row.backgrounds.reserveCapacity(8)
-        row.glyphs.reserveCapacity(rows[y].glyphs.count + 8)
+        swap(&row, &rows[y])
+        defer { rows[y] = row }
+        row.backgrounds.removeAll(keepingCapacity: true)
+        row.glyphs.removeAll(keepingCapacity: true)
+        row.decorations.removeAll(keepingCapacity: true)
 
         var selection = GhosttyRenderStateRowSelection()
         selection.size = MemoryLayout<GhosttyRenderStateRowSelection>.size
@@ -271,42 +281,69 @@ final class TerminalRenderer {
             && cursor.style == GHOSTTY_CURSOR_STYLE_BLOCK.rawValue
         let cursorColumn = cursor.wideTail ? cursor.x - 1 : cursor.x
 
+        // The row's raw cells in one call. Most cells are plain text in the
+        // default colors, and those need nothing more: only a styled cell, a
+        // colored blank or a grapheme cluster asks the render state for its
+        // colors, style or text.
         var cells = rowCells
         ghostty_render_state_row_get(rowIterator, GHOSTTY_RENDER_STATE_ROW_DATA_CELLS, &cells)
+        var view = GhosttyCellsView()
+        guard ghostty_render_state_row_get(rowIterator, GHOSTTY_RENDER_STATE_ROW_DATA_CELLS_RAW, &view) == GHOSTTY_SUCCESS,
+              let raw = view.ptr else { return }
 
-        var codepoints = [UInt32](repeating: 0, count: 16)
-        var x = -1
-        while ghostty_render_state_row_cells_next(rowCells) {
-            x += 1
-            var raw = GhosttyCell()
-            ghostty_render_state_row_cells_get(rowCells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_RAW, &raw)
+        let layout = CellLayout.current
+        // Text in one style comes in runs; a run's colors are asked for once.
+        // (Style ids belong to the page a row is on, so only within a row.)
+        var run: (style: UInt64, flags: UInt16, underline: UInt32?, foreground: UInt32, background: UInt32?)?
+        for x in 0..<view.len {
+            let cell = raw[x]
             var wide = GHOSTTY_CELL_WIDE_NARROW
-            ghostty_cell_get(raw, GHOSTTY_CELL_DATA_WIDE, &wide)
+            var content = GHOSTTY_CELL_CONTENT_CODEPOINT
+            var styled = false
+            var codepoint: UInt32 = 0
+            if let layout {
+                wide = GhosttyCellWide(rawValue: UInt32(layout.wide(cell)))
+                content = GhosttyCellContentTag(rawValue: UInt32(layout.contentTag(cell)))
+                styled = layout.styleID(cell) != 0 // style 0 is the default
+                codepoint = UInt32(layout.codepoint(cell))
+            } else {
+                ghostty_cell_get(cell, GHOSTTY_CELL_DATA_WIDE, &wide)
+                ghostty_cell_get(cell, GHOSTTY_CELL_DATA_CONTENT_TAG, &content)
+                ghostty_cell_get(cell, GHOSTTY_CELL_DATA_HAS_STYLING, &styled)
+                ghostty_cell_get(cell, GHOSTTY_CELL_DATA_CODEPOINT, &codepoint)
+            }
             // The second half of a wide character is drawn by the first.
             if wide == GHOSTTY_CELL_WIDE_SPACER_TAIL { continue }
             let span = wide == GHOSTTY_CELL_WIDE_WIDE ? 2 : 1
+            let plain = !styled && content == GHOSTTY_CELL_CONTENT_CODEPOINT
 
             var flags: UInt16 = 0
             var underlineColor: UInt32?
-            var styled = false
-            ghostty_render_state_row_cells_get(rowCells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_HAS_STYLING, &styled)
-            if styled {
-                var style = GhosttyStyle()
-                ghostty_render_state_row_cells_get(rowCells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_STYLE, &style)
-                flags = style.flags
-                if style.underline_color.tag == UInt8(GHOSTTY_STYLE_COLOR_RGB.rawValue) {
-                    underlineColor = Self.pack(style.underline_color.value.rgb)
-                }
-            }
-
-            var color = GhosttyColorRgb()
             var foreground = colors.foreground
             var background: UInt32?
-            if ghostty_render_state_row_cells_get(rowCells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_FG_COLOR, &color) == GHOSTTY_SUCCESS {
-                foreground = Self.pack(color)
-            }
-            if ghostty_render_state_row_cells_get(rowCells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR, &color) == GHOSTTY_SUCCESS {
-                background = Self.pack(color)
+            let style = layout.map { $0.styleID(cell) } ?? 0
+            if styled, content == GHOSTTY_CELL_CONTENT_CODEPOINT, style != 0, let run, run.style == style {
+                (flags, underlineColor, foreground, background) = (run.flags, run.underline, run.foreground, run.background)
+            } else if !plain {
+                ghostty_render_state_row_cells_select(rowCells, UInt16(x))
+                if styled {
+                    var attributes = GhosttyStyle()
+                    ghostty_render_state_row_cells_get(rowCells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_STYLE, &attributes)
+                    flags = attributes.flags
+                    if attributes.underline_color.tag == UInt8(GHOSTTY_STYLE_COLOR_RGB.rawValue) {
+                        underlineColor = Self.pack(attributes.underline_color.value.rgb)
+                    }
+                }
+                var color = GhosttyColorRgb()
+                if styled, ghostty_render_state_row_cells_get(rowCells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_FG_COLOR, &color) == GHOSTTY_SUCCESS {
+                    foreground = Self.pack(color)
+                }
+                if ghostty_render_state_row_cells_get(rowCells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR, &color) == GHOSTTY_SUCCESS {
+                    background = Self.pack(color)
+                }
+                if styled, content == GHOSTTY_CELL_CONTENT_CODEPOINT, style != 0 {
+                    run = (style, flags, underlineColor, foreground, background)
+                }
             }
             if flags & StyleFlag.inverse != 0 {
                 (foreground, background) = (background ?? colors.background, foreground)
@@ -335,44 +372,46 @@ final class TerminalRenderer {
                 }
             }
 
-            var length: UInt32 = 0
-            ghostty_render_state_row_cells_get(rowCells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_LEN, &length)
-            if length > 0, flags & StyleFlag.invisible == 0 {
-                let count = codepoints.withUnsafeMutableBufferPointer { buffer -> Int in
-                    var graphemes = GhosttyCodepointBuffer(ptr: buffer.baseAddress, cap: buffer.count, len: 0)
+            if flags & StyleFlag.invisible == 0 {
+                let bold = flags & StyleFlag.bold != 0, italic = flags & StyleFlag.italic != 0
+                var entry = GlyphAtlas.Entry()
+                if content == GHOSTTY_CELL_CONTENT_CODEPOINT {
+                    if codepoint != 0, codepoint != 0x20 {
+                        entry = atlas.entry(codepoint: codepoint, bold: bold, italic: italic, span: span)
+                    }
+                } else if content == GHOSTTY_CELL_CONTENT_CODEPOINT_GRAPHEME {
+                    var graphemes = GhosttyCodepointBuffer(ptr: codepoints, cap: Self.clusterCapacity, len: 0)
                     ghostty_render_state_row_cells_get(rowCells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_BUF, &graphemes)
-                    return min(graphemes.len, buffer.count)
+                    let count = min(graphemes.len, Self.clusterCapacity)
+                    if count > 0 {
+                        entry = atlas.entry(
+                            codepoints: UnsafeBufferPointer(start: codepoints, count: count), bold: bold, italic: italic, span: span)
+                    }
                 }
-                if count > 0, !(count == 1 && codepoints[0] == 0x20) {
-                    let entry = codepoints.withUnsafeBufferPointer { buffer in
-                        atlas.entry(
-                            codepoints: UnsafeBufferPointer(rebasing: buffer[0..<count]),
-                            bold: flags & StyleFlag.bold != 0, italic: flags & StyleFlag.italic != 0, span: span)
-                    }
-                    if entry.width > 0 {
-                        row.glyphs.append(Instance(
-                            x: Int16(left + Int(entry.offsetX)), y: Int16(top + Int(entry.offsetY)),
-                            width: entry.width, height: entry.height, u: entry.u, v: entry.v,
-                            mode: entry.isColor ? 2 : 1, color: foreground))
-                    }
+                if entry.width > 0 {
+                    row.glyphs.append(Instance(
+                        x: Int16(left + Int(entry.offsetX)), y: Int16(top + Int(entry.offsetY)),
+                        width: entry.width, height: entry.height, u: entry.u, v: entry.v,
+                        mode: entry.isColor ? 2 : 1, color: foreground))
                 }
             }
 
-            func line(at offset: Int, _ lineColor: UInt32) {
-                row.decorations.append(Instance(
-                    x: Int16(left), y: Int16(top + offset), width: UInt16(width), height: UInt16(m.thickness), color: lineColor))
-            }
             let underline = (flags & StyleFlag.underlineMask) >> StyleFlag.underlineShift
-            if underline != 0 {
-                // ponytail: curly, dotted and dashed underlines are drawn as
-                // plain lines; draw real shapes when a program relies on them.
-                line(at: m.underlineOffset, underlineColor ?? foreground)
-                if underline == 2 { line(at: max(0, m.underlineOffset - 2 * m.thickness), underlineColor ?? foreground) }
+            if flags & StyleFlag.decorationMask != 0 {
+                func line(at offset: Int, _ lineColor: UInt32) {
+                    row.decorations.append(Instance(
+                        x: Int16(left), y: Int16(top + offset), width: UInt16(width), height: UInt16(m.thickness), color: lineColor))
+                }
+                if underline != 0 {
+                    // ponytail: curly, dotted and dashed underlines are drawn as
+                    // plain lines; draw real shapes when a program relies on them.
+                    line(at: m.underlineOffset, underlineColor ?? foreground)
+                    if underline == 2 { line(at: max(0, m.underlineOffset - 2 * m.thickness), underlineColor ?? foreground) }
+                }
+                if flags & StyleFlag.strikethrough != 0 { line(at: m.strikeOffset, foreground) }
+                if flags & StyleFlag.overline != 0 { line(at: 0, foreground) }
             }
-            if flags & StyleFlag.strikethrough != 0 { line(at: m.strikeOffset, foreground) }
-            if flags & StyleFlag.overline != 0 { line(at: 0, foreground) }
         }
-        rows[y] = row
     }
 
     /// Things drawn over the grid that aren't worth caching per row.
@@ -500,4 +539,42 @@ private enum StyleFlag {
     static let overline: UInt16 = 1 << 7
     static let underlineShift: UInt16 = 8
     static let underlineMask: UInt16 = 0x7 << 8
+    /// Anything drawn as a line: underline, strikethrough, overline.
+    static let decorationMask: UInt16 = underlineMask | strikethrough | overline
+}
+
+/// Where a GhosttyCell keeps the fields a frame needs, read once from the
+/// library's own description of the layout (`ghostty_type_json`, which the
+/// header recommends where a call per field costs too much: four calls a
+/// cell were a large part of building a frame). Nil if the description
+/// lacks them; cells are then read with `ghostty_cell_get`.
+struct CellLayout {
+    struct Field {
+        let shift: UInt64
+        let mask: UInt64
+        func callAsFunction(_ cell: GhosttyCell) -> UInt64 { (cell >> shift) & mask }
+    }
+
+    let contentTag: Field
+    let codepoint: Field
+    let styleID: Field
+    let wide: Field
+
+    static let current: CellLayout? = {
+        guard let json = ghostty_type_json(),
+              let root = try? JSONSerialization.jsonObject(with: Data(String(cString: json).utf8)) as? [String: Any],
+              let types = root["types"] as? [String: Any], let cell = types["GhosttyCell"] as? [String: Any],
+              let bits = cell["bits"] as? [String: [String: Any]] else { return nil }
+        func field(_ spec: [String: Any]?, offset: Int = 0) -> Field? {
+            guard let lsb = spec?["lsb"] as? Int, let width = spec?["width"] as? Int, width < 64 else { return nil }
+            return Field(shift: UInt64(lsb + offset), mask: (1 << UInt64(width)) - 1)
+        }
+        let content = bits["content"]
+        let arms = content?["arms"] as? [String: [String: Any]]
+        let codepoint = (arms?["CODEPOINT"]?["bits"] as? [String: [String: Any]])?["codepoint"]
+        guard let contentLSB = content?["lsb"] as? Int,
+              let tag = field(bits["content_tag"]), let cp = field(codepoint, offset: contentLSB),
+              let style = field(bits["style_id"]), let wide = field(bits["wide"]) else { return nil }
+        return CellLayout(contentTag: tag, codepoint: cp, styleID: style, wide: wide)
+    }()
 }

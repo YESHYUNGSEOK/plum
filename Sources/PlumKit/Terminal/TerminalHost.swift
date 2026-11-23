@@ -240,22 +240,11 @@ private final class HostSession {
         pid = child
 
         let reader = Thread { [self] in
-            let buffer = UnsafeMutableRawBufferPointer.allocate(byteCount: 64 * 1024, alignment: 16)
-            defer { buffer.deallocate() }
-            while true {
-                var n = read(master, buffer.baseAddress, buffer.count)
-                if n < 0, errno == EINTR { continue }
-                guard n > 0 else { break }
-                // The pty hands over about 1 KB per read. Whatever more is
-                // waiting is read now too and passed on in one write: one
-                // wakeup of the app per batch, not per kilobyte.
-                var waiting: Int32 = 0
-                while n < buffer.count, ioctl(master, 0x4004_667F /* FIONREAD */, &waiting) == 0, waiting > 0 {
-                    let more = read(master, buffer.baseAddress! + n, buffer.count - n)
-                    guard more > 0 else { break }
-                    n += more
-                }
-                output(UnsafeRawBufferPointer(rebasing: buffer[..<n]))
+            // Batches go to the app in one write each: one wakeup of the app
+            // per batch, not per kilobyte the pty hands over.
+            TerminalIO.readOutput(from: master, batching: true) { bytes in
+                output(bytes)
+                return true
             }
             // The program ended: so does the app's tab.
             lock.lock()
@@ -301,13 +290,7 @@ private final class HostSession {
     }
 
     private func writeInput(_ data: Data) {
-        data.withUnsafeBytes { raw in
-            var offset = 0
-            while offset < raw.count {
-                let n = Darwin.write(master, raw.baseAddress! + offset, raw.count - offset)
-                if n > 0 { offset += n } else if n < 0, errno == EINTR { continue } else { return }
-            }
-        }
+        _ = data.withUnsafeBytes { TerminalIO.write(master, $0) }
     }
 
     /// Hands the terminal to `connection`: the answer line, then the parked

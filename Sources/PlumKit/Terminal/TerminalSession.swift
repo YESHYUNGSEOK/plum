@@ -134,6 +134,7 @@ public final class TerminalSession {
     // Guarded by termLock.
     private var held = false
     private var holdStartedAt: UInt64 = 0
+    private var holdCapturedAt: UInt64 = 0
     private var dirtyPosted = false
     private var cellWidthPx: UInt32 = 8
     private var cellHeightPx: UInt32 = 16
@@ -271,11 +272,20 @@ public final class TerminalSession {
             let session = TerminalSession.from(userdata)
             if held {
                 // The terminal holds exactly the frame the program wants left
-                // on screen; capture it before anything newer is parsed.
-                session.renderLock.lock()
-                ghostty_render_state_update(session.renderState, terminal)
-                session.renderLock.unlock()
-                session.holdStartedAt = DispatchTime.now().uptimeNanoseconds
+                // on screen; capture it before anything newer is parsed. Not
+                // at every hold: a program that wraps each repaint starts
+                // thousands a second, and copying the screen for each was most
+                // of the reading thread's work. The screen shows one frame per
+                // refresh at most, so one capture per refresh is enough; until
+                // the next, the last complete frame stays.
+                let now = DispatchTime.now().uptimeNanoseconds
+                if now &- session.holdCapturedAt >= 8_000_000 {
+                    session.renderLock.lock()
+                    ghostty_render_state_update(session.renderState, terminal)
+                    session.renderLock.unlock()
+                    session.holdCapturedAt = now
+                }
+                session.holdStartedAt = now
             }
             session.held = held
         }
@@ -417,27 +427,19 @@ public final class TerminalSession {
     }
 
     private func startReading(_ pty: Pty) {
-        // Output is read on a thread of its own, asleep in a blocking read(2).
-        // The pty hands over about 1 KB per read, so the time to wake for each
-        // kilobyte sets the speed. The kernel wakes a thread waiting in read
-        // directly; waiting through poll or a dispatch source adds a wakeup
-        // per kilobyte. Reading `cat` output on this Mac (M4 Pro): blocking
-        // read 190 MB/s, poll 147, dispatch source 133.
+        // Output is read on a thread of its own (TerminalIO.readOutput: why
+        // it doesn't sleep in a blocking read). The thread has its own buffer:
+        // the session may go away while it reads.
         let reader = Thread { [weak self] in
-            // The thread's own buffer: the session may go away while it reads.
-            let buffer = UnsafeMutableRawBufferPointer.allocate(byteCount: 64 * 1024, alignment: 16)
-            defer { buffer.deallocate() }
-            while true {
-                let n = read(pty.fd, buffer.baseAddress, buffer.count)
-                if n < 0, errno == EINTR { continue }
-                guard let self else { return } // gone; deinit woke this read
-                guard n > 0 else { break } // EOF, or EIO once the last slave fd closes
+            TerminalIO.readOutput(from: pty.fd, batching: false) { bytes in
+                guard let self else { return false } // gone; deinit woke the reader
                 // Parsed here, between reads. Handing it to another thread
                 // instead sped up output that is slow to parse (TUI redraws,
                 // 1.4x) but slowed the rest (plain text 0.7x) and cost more
                 // CPU per byte everywhere (1.1-2.4x): the wrong trade with
                 // many sessions running at the modest rates agents write.
-                self.consume(UnsafeRawBufferPointer(rebasing: buffer[..<n]))
+                self.consume(bytes)
+                return true
             }
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
@@ -504,19 +506,7 @@ public final class TerminalSession {
             // the rest back, in order, while its output keeps being read on
             // the reader thread. Once the program is gone, writes fail and the
             // rest is dropped.
-            data.withUnsafeBytes { raw in
-                var offset = 0
-                while offset < raw.count {
-                    let n = Darwin.write(pty.fd, raw.baseAddress! + offset, raw.count - offset)
-                    if n > 0 {
-                        offset += n
-                    } else if n < 0, errno == EINTR {
-                        continue
-                    } else {
-                        return
-                    }
-                }
-            }
+            _ = data.withUnsafeBytes { TerminalIO.write(pty.fd, $0) }
         }
     }
 

@@ -53,4 +53,35 @@ final class PtySpeedTests: XCTestCase {
                          name.padding(toLength: 14, withPad: " ", startingAt: 0), sorted[sorted.count / 2], sorted.first!, sorted.last!, runs, m(cpu)))
         }
     }
+
+    /// Parsing alone, fed straight in (no pty, no drawing): steady enough
+    /// to compare changes to the reading path by.
+    func testParseSpeed() throws {
+        guard let folder = ProcessInfo.processInfo.environment["PLUM_BENCH_DATA"] else {
+            throw XCTSkip("set PLUM_BENCH_DATA to measure")
+        }
+        let names = ProcessInfo.processInfo.environment["PLUM_BENCH_SETS"]?.split(separator: ",").map(String.init)
+            ?? ["ascii", "scrolling", "dense_cells", "unicode", "cursor_motion", "scroll_region", "sync_tui"]
+        for name in names {
+            let data = try Data(contentsOf: URL(fileURLWithPath: folder).appendingPathComponent(name + ".txt"))
+            var speeds: [Double] = []
+            for _ in 0..<5 {
+                let session = TerminalSession(cols: 122, rows: 46)
+                let start = Self.cpuSeconds()
+                data.withUnsafeBytes { raw in
+                    var offset = 0
+                    while offset < raw.count {
+                        // About what the host hands over per read.
+                        let n = min(16 * 1024, raw.count - offset)
+                        session.feed(UnsafeRawBufferPointer(rebasing: raw[offset..<(offset + n)]))
+                        offset += n
+                    }
+                }
+                speeds.append(Double(data.count) / 1e6 / (Self.cpuSeconds() - start))
+            }
+            let sorted = speeds.sorted()
+            print(String(format: "PARSE %@ median %.0f MB/s of CPU (min %.0f, max %.0f)",
+                         name.padding(toLength: 14, withPad: " ", startingAt: 0), sorted[2], sorted[0], sorted[4]))
+        }
+    }
 }

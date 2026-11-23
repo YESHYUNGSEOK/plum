@@ -114,6 +114,8 @@ public final class AppModel {
     @ObservationIgnored var debugWindowNumber: (() -> Int)?
     @ObservationIgnored var debugTerminalView: (() -> TerminalView?)?
     @ObservationIgnored var debugNotificationStatus: (() -> String)?
+    /// Installs a local zip and signature as an update would, then restarts.
+    @ObservationIgnored var debugInstallUpdate: ((_ zip: URL, _ signature: URL, _ version: String) -> String)?
     @ObservationIgnored var debugWindow: (() -> NSWindow?)?
     @ObservationIgnored var debugToggleSidebar: (() -> Void)?
     @ObservationIgnored var debugTraceDialogClose: ((@escaping (String) -> Void) -> Void)?

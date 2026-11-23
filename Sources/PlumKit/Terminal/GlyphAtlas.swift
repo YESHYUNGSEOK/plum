@@ -82,6 +82,16 @@ final class GlyphAtlas {
     private let device: MTLDevice
     private let fonts: [CTFont] // indexed by (bold ? 1 : 0) | (italic ? 2 : 0)
     private var single: [UInt64: Entry] = [:]
+    /// ASCII in each face and width, the bulk of most screens: found by
+    /// index, without hashing (a dictionary lookup per glyph was the largest
+    /// cost of building a frame).
+    private var ascii = [Entry?](repeating: nil, count: 128 * 8)
+    /// Other codepoints (box drawing, Hangul, symbols) found again by a
+    /// cheap hash before the dictionary, which hashes far more slowly.
+    /// Direct-mapped: a collision only means a trip to the dictionary.
+    private static let recentSlots = 4096
+    private var recentKeys = [UInt64](repeating: .max, count: recentSlots)
+    private var recentEntries = [Entry](repeating: Entry(), count: recentSlots)
     private var clusters: [String: Entry] = [:]
     // Start small: most sessions never need more than a few hundred glyphs.
     private var graySize = 1024
@@ -134,16 +144,35 @@ final class GlyphAtlas {
         return device.makeTexture(descriptor: descriptor)!
     }
 
+    /// The glyph for one codepoint. `span` is how many cells it covers.
+    func entry(codepoint: UInt32, bold: Bool, italic: Bool, span: Int) -> Entry {
+        let variant = (bold ? 1 : 0) | (italic ? 2 : 0) | (span > 1 ? 4 : 0)
+        if codepoint < 128 {
+            let index = Int(codepoint) | variant << 7
+            if let hit = ascii[index] { return hit }
+            let made = rasterize(String(UnicodeScalar(UInt8(codepoint))), variant & 3, span)
+            ascii[index] = made
+            return made
+        }
+        let key = UInt64(codepoint) | UInt64(variant) << 32
+        let slot = Int(truncatingIfNeeded: (key &* 0x9E37_79B9_7F4A_7C15) >> 52)
+        if recentKeys[slot] == key { return recentEntries[slot] }
+        let found: Entry
+        if let hit = single[key] {
+            found = hit
+        } else {
+            found = UnicodeScalar(codepoint).map { rasterize(String($0), variant & 3, span) } ?? Entry()
+            single[key] = found
+        }
+        recentKeys[slot] = key
+        recentEntries[slot] = found
+        return found
+    }
+
     /// The glyph for one cell's text. `span` is how many cells it covers.
     func entry(codepoints: UnsafeBufferPointer<UInt32>, bold: Bool, italic: Bool, span: Int) -> Entry {
         let variant = UInt64((bold ? 1 : 0) | (italic ? 2 : 0) | (span > 1 ? 4 : 0))
-        if codepoints.count == 1 {
-            let key = UInt64(codepoints[0]) | variant << 32
-            if let hit = single[key] { return hit }
-            let made = rasterize(String(scalars: codepoints), Int(variant & 3), span)
-            single[key] = made
-            return made
-        }
+        if codepoints.count == 1 { return entry(codepoint: codepoints[0], bold: bold, italic: italic, span: span) }
         let key = String(scalars: codepoints) + String(UnicodeScalar(UInt8(48 + variant)))
         if let hit = clusters[key] { return hit }
         let made = rasterize(String(scalars: codepoints), Int(variant & 3), span)
@@ -309,6 +338,8 @@ final class GlyphAtlas {
         }
         single.removeAll(keepingCapacity: true)
         clusters.removeAll(keepingCapacity: true)
+        for i in ascii.indices { ascii[i] = nil }
+        for i in recentKeys.indices { recentKeys[i] = .max }
         grayPacker = ShelfPacker(size: graySize)
         colorPacker = ShelfPacker(size: colorSize)
         generation += 1

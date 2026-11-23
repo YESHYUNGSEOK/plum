@@ -4,8 +4,8 @@
 
 <h1>Plum</h1>
 
-<p><b>AI 코딩 에이전트 여러 개를, 각자의 git worktree에서 나란히.</b><br>
-가벼운 네이티브 macOS 앱.</p>
+<p><b>Ghostty보다 가볍고 빠른 터미널에, Orca 같은 에이전트 작업 공간.</b><br>
+AI 코딩 에이전트 여러 개를 각자의 git worktree에서 나란히 돌리는 네이티브 macOS 앱.</p>
 
 <p>
 <a href="#설치"><img src="https://img.shields.io/badge/macOS-14%2B-1A1A1D?style=flat-square&logo=apple&logoColor=white" alt="macOS 14 이상"></a>
@@ -27,24 +27,24 @@
 
 </div>
 
-프로젝트(git 저장소)를 등록하고 워크스페이스를 추가하면 git worktree를 만들어 주고, 그 안에서 AI 코딩 에이전트를 돌릴 터미널까지 한 창에 담은 macOS 앱이다. 가볍고 빠른 네이티브 앱을 목표로 한다.
+Orca처럼 프로젝트(git 저장소)를 등록하고 워크스페이스를 추가하면 브랜치와 worktree, 에이전트를 돌릴 터미널까지 한 창에 준비된다. 그러면서 터미널은 Ghostty보다 가볍고 빠르다. 같은 Mac에서 최신 Ghostty(1.4.0)와 번갈아 재 보면 메모리는 1/4(37MB 대 148MB), 키 입력이 화면에 나오기까지 18.5ms 대 24.0ms, 출력 처리는 7종류 모두 1.05~2.64배 빠르다([측정 결과](#측정-결과)).
 
 상태: **0.1 (초기 공개판)**. 설계는 [`docs/superpowers/specs/2026-11-16-plum-design.md`](docs/superpowers/specs/2026-11-16-plum-design.md)에 있다.
 
 ## 한눈에
 
+- **Ghostty보다 가볍고 빠르다.** 메모리는 터미널 1개에 37MB, 10개에 49MB로 Ghostty의 1/4. 키 입력 지연 18.5ms(Ghostty 24.0ms), 출력 처리는 일반 텍스트 1.05배에서 색이 많은 화면 2.64배까지 7종류 모두 앞선다. 쉬는 동안 CPU는 30초에 1ms다.
 - **워크스페이스마다 worktree 하나.** 새 워크스페이스를 만들면 브랜치와 worktree를 만들고, `.env` 같은 파일을 복사하고, 설정 명령을 돌린 뒤 첫 탭에서 Claude나 Codex를 띄운다.
 - **에이전트 상태가 보이는 곳에.** 작업 중·입력 대기·완료·모니터링이 탭과 사이드바에 링으로 보이고, 손이 필요한 것은 맨 위로 모인다.
 - **앱을 꺼도 살아 있는 터미널.** 껐다 켜도 셸, 에이전트, 개발 서버가 그대로 돌고 화면과 스크롤백이 돌아온다.
 - **제대로 된 터미널.** 바탕은 libghostty-vt, 그리기는 Metal. 화면 분할, 찾기, 마우스 리포팅, OSC 8·52·133.
 - **변경과 PR.** 커밋 안 한 변경이나 브랜치 전체의 diff, 사이드바의 PR 상태와 체크, PR 만들기까지.
-- **작고 빠르다.** 터미널 하나일 때 메모리 37MB, 키 입력이 화면에 나오기까지 18.5ms. Ghostty는 148MB, 24.0ms다([측정 결과](#측정-결과)).
 
 ## 설치
 
 릴리스 페이지에서 `Plum-<버전>-arm64.zip`을 받아 풀고, `Plum.app`을 응용 프로그램 폴더로 옮긴다. Apple Silicon Mac, macOS 14 이상에서 돈다.
 
-아직 Apple 개발자 서명과 공증을 하지 않아서, 처음 열 때 macOS가 막는다. Finder에서 Plum을 Control-클릭한 뒤 "열기"를 고르거나, 터미널에서 한 번 실행한다.
+아직 Apple 개발자 서명과 공증을 하지 않아서, 처음 열 때 macOS가 막는다. 한 번 열어 보고 막히면 시스템 설정 → 개인정보 보호 및 보안 맨 아래의 "그래도 열기"를 누르거나, 터미널에서 한 번 실행한다. 그 뒤의 업데이트는 Plum이 직접 내려받아 설치한다.
 
 ```sh
 xattr -dr com.apple.quarantine /Applications/Plum.app
@@ -59,8 +59,10 @@ xattr -dr com.apple.quarantine /Applications/Plum.app
 ./scripts/bundle.sh     # build/Plum.app 생성 (릴리스 빌드, ad-hoc 서명)
 open build/Plum.app
 swift test              # 자동 테스트
-./scripts/release.sh    # 배포용 build/Plum-<버전>-<아키텍처>.zip과 SHA-256
+./scripts/release.sh    # 배포용 build/Plum-<버전>-<아키텍처>.zip, 업데이트 서명 .sig, SHA-256
 ```
+
+릴리스에는 zip과 `.sig`를 함께 올린다. `.sig`는 업데이트 키(`~/.config/plum/update-signing-key`, `scripts/update-signing.swift`)로 만든다. 이 키를 잃으면 이미 배포된 앱은 그 뒤 릴리스를 스스로 설치하지 못하니 따로 백업해 둔다.
 
 `build-vt.sh`는 Zig 압축 파일의 SHA-256을 확인하고, 내려받은 것은 `.tools/`에만 둔다(시스템에 설치하지 않는다).
 
@@ -145,7 +147,7 @@ swift test              # 자동 테스트
 - 변경 보기 ⇧⌘E(사이드바의 +/− 숫자를 눌러도, 워크스페이스 우클릭으로도): 파일 목록과 줄 번호가 붙은 diff. "커밋 안 한 변경"과 "브랜치 전체"(기준 브랜치와 갈라진 곳부터, 커밋 안 한 것 포함)를 고른다. 새 파일도 보인다. 파일마다 3000줄까지 그린다.
 - PR 만들기(변경 보기 화면, 워크스페이스 우클릭): 새 탭에서 `gh pr create --web`을 실행한다. 어디로 push할지는 gh가 그 탭에서 묻고, 끝나면 GitHub 양식이 브라우저에 열린다.
 - 기존 워크트리: 프로젝트를 추가하면 그 저장소에 이미 있는 워크트리(직접 만들었거나 다른 도구가 만든 것)가 워크스페이스로 함께 들어온다. 나중에 생긴 것은 프로젝트 우클릭 → "기존 워크트리 가져오기". 디스크는 건드리지 않고, 브랜치 없는 워크트리는 뺀다.
-- 업데이트: 하루 한 번 GitHub 릴리스를 확인해 새 버전이 있을 때만 알리고, Plum 메뉴 → "업데이트 확인…"으로 바로 확인한다. 내려받기 페이지를 열어 줄 뿐 앱을 스스로 바꾸지는 않는다(서명된 빌드 없이는 안전하지 않다). 저장소가 비공개인 동안에는 확인할 릴리스가 없다고 나온다.
+- 업데이트: 하루 한 번 GitHub 릴리스를 확인해 새 버전이 있을 때만 묻고, Plum 메뉴 → "업데이트 확인…"으로 바로 확인한다. "설치하고 다시 시작"을 누르면 이 Mac용 zip을 내려받아, 함께 올린 Ed25519 서명(`.sig`)이 앱에 든 공개 키와 맞는지, 안의 앱이 그 버전의 Plum인지 확인한 뒤 한 번에 바꿔 끼우고 다시 연다. 터미널과 그 안의 프로그램은 그대로 이어진다. 서명이 맞지 않거나, macOS가 정한 임시 위치에서 돌고 있거나, 폴더를 바꿀 권한이 없으면 설치하지 않고 내려받기 페이지를 권한다. 저장소가 비공개인 동안에는 확인할 릴리스가 없다고 나온다.
 - 신뢰 기록(기본 켬): 에이전트 탭을 열기 전에 그 폴더를 Claude(`~/.claude.json`의 `hasTrustDialogAccepted`)와 Codex(`~/.codex/config.toml`의 `[projects."<폴더>"] trust_level = "trusted"`)에 신뢰한 폴더로 적는다. 새 워크트리에서 "이 폴더를 신뢰하나요?"에 멈추지 않는다. Claude 설정은 Claude의 잠금(`.claude.json.lock`)을 잡고 다시 읽은 뒤 파일 전체를 바꿔 넣는다. 설정 파일이 없거나 읽을 수 없으면 아무것도 쓰지 않는다. Codex에 이미 그 폴더 항목이 있으면 그대로 둔다.
 
 마지막에 고른 워크스페이스는 다음에 열 때 다시 선택된다.
@@ -233,6 +235,7 @@ Plum은 터미널마다 `PLUM_SOCKET`, `PLUM_TAB_ID`, `PLUM_CLAUDE_SETTINGS` 환
 
 - **전환 효과의 체감**: 배경 창에서 측정과 캡처로 확인했다. 120Hz 화면 앞에서 눈으로 본 확인은 아니다.
 - **Developer ID 서명과 공증**: 인증서가 없어 `release.sh`의 그 단계는 실행해 보지 못했다(ad-hoc + hardened runtime까지만 확인).
+- **실제 릴리스로 하는 업데이트 (2026-11-23)**: 테스트 앱에서 서명한 0.2.0 zip을 같은 설치 경로로 넣어, 변조한 파일과 버전이 다른 파일은 거부하고, 맞는 파일은 바꿔 끼운 뒤 다시 열리며 터미널과 그 안의 `sleep`이 이어지는 것을 확인했다. GitHub에서 내려받는 부분과, 응용 프로그램 폴더에 있는 앱을 바꿀 때 macOS가 "앱 관리" 권한을 묻는지는 확인하지 못했다.
 - **한글 입력(IME)을 실제 키보드로**: 입력기가 부르는 메서드는 확인했지만(위), 실제 macOS 입력기를 거친 입력은 아니다. 특히 조합 중 Enter는 입력기가 처리하는 부분이라 확인하지 못했다.
 - **실제 키보드와 마우스**: 키와 클릭은 모두 합성 이벤트를 앱의 실제 경로(`NSApp.sendEvent`)로 보내 확인했다. 사람이 키보드·트랙패드로 해 본 확인은 아니다.
 - **macOS 알림 (2026-11-20)**: 지금 방식은 ad-hoc 서명과 직접 만든 인증서 서명 모두 "이 앱에는 알림이 허용되지 않음"으로 거부됐다. 예전 방식으로 보낸 완료·입력 대기 알림이 배너로 뜨는 것과 알림 센터에 같은 탭의 최신 것만 남는 것을 테스트 앱에서 확인했다. 알림에 식별자를 붙이면 아예 뜨지 않아서 붙이지 않는다. PR 소식 알림은 자동 테스트로만 확인했다.
@@ -241,30 +244,42 @@ Plum은 터미널마다 `PLUM_SOCKET`, `PLUM_TAB_ID`, `PLUM_CLAUDE_SETTINGS` 환
 
 ## 측정 결과
 
-최신 Ghostty(1.4.0)와 같은 Mac(M4 Pro, 외장 75Hz 화면)에서 번갈아 쟀다. 값은 중앙값이고, 표본 수·흩어짐·측정 방법·한계는 [`docs/benchmarks/2026-11-17.md`](docs/benchmarks/2026-11-17.md)에 있다.
+메모리, 키 입력 지연, 출력 처리 모두 최신 Ghostty(1.4.0)보다 앞선다. 같은 Mac(M4 Pro, 외장 75Hz 화면)에서 두 앱을 번갈아 쟀다.
+
+**출력 처리 (2026-11-23).** 같은 데이터를 두 앱에 번갈아 보내고, 차례마다 그 앱을 맨 앞에 두어 둘 다 그리게 했다. 종류마다 6라운드를 돌려 라운드별 비율의 중앙값을 냈다.
+
+| 데이터 | Plum ÷ Ghostty 1.4.0 |
+|---|---|
+| 색이 많은 화면 (dense_cells) | **2.64배** |
+| 유니코드 (unicode) | **1.42배** |
+| 스크롤 (scrolling) | **1.32배** |
+| 커서 이동 (cursor_motion) | **1.29배** |
+| TUI 다시 그리기 (sync_tui) | **1.17배** |
+| 스크롤 영역 (scroll_region) | **1.07배** (다시 재서 1.13배) |
+| 일반 텍스트 (ascii) | **1.05배** (다시 재서 1.09배) |
+
+**메모리, 지연, 실행 (2026-11-17, 중앙값).**
 
 | 항목 | Plum | Ghostty 1.4.0 | 표본 |
 |---|---|---|---|
-| 앱 크기 | 3.0MB | 67MB | |
-| 실행 → 창이 뜸 | 284ms | 346ms | 각 15회 |
+| 메모리, 터미널 1개, 보이는 유휴 상태 | **37MB** | 148MB | 각 4회 |
+| 메모리, 터미널 10개 | **49MB** | 214MB | 각 5회 |
+| 키 입력 → 화면 표시 | **18.5ms** | 24.0ms | 각 400회 |
+| 유휴 CPU (30초) | **1ms** | 107ms | 각 4회 |
+| 실행 → 창이 뜸 | **284ms** | 346ms | 각 15회 |
 | 실행 → 셸 시작 | 243ms | 226ms | 각 15회 |
-| 출력 처리, 일반 텍스트 | 119MB/s | 254MB/s | 각 10회 |
-| 출력 처리, TUI 다시 그리기 (sync_tui) | 119MB/s | 156MB/s | 각 10회 |
-| 출력 처리, 색이 많은 화면 (dense_cells) | 137MB/s | 90MB/s | 각 10회 |
-| 키 입력 → 화면 표시 | 18.5ms | 24.0ms | 각 400회 |
-| 메모리, 터미널 1개, 보이는 유휴 상태 | 37MB | 148MB | 각 4회 |
-| 메모리, 터미널 10개 | 49MB | 214MB | 각 5회 |
-| 유휴 CPU (30초) | 1ms | 107ms | 각 4회 |
+| 앱 크기 | **3.0MB** | 67MB | |
 
-- 일반 텍스트, 스크롤, TUI 다시 그리기는 Ghostty 1.4.0이 빠르고, 색이 많은 화면, 유니코드, 커서 이동은 Plum이 빠르다. Plum의 일반 텍스트 한계는 pty가 아니라 Plum 쪽에 있다. 정확히 어디인지는 아직 확인하지 않았다.
+- 셸이 시작되기까지는 Ghostty가 17ms 빠르다.
 - 키 입력 지연에는 키보드와 패널의 응답 시간이 들어 있지 않다.
+- 한 대의 Mac에서 잰 값이다. 라운드별 값과 평균, 측정 방법, 한계는 [`docs/benchmarks/2026-11-20.md`](docs/benchmarks/2026-11-20.md)(출력 처리와 그사이의 최적화, 메모리가 어디에 쓰이는지)와 [`docs/benchmarks/2026-11-17.md`](docs/benchmarks/2026-11-17.md)(표본 수, 흩어짐)에 있다.
 - 지난 측정(Ghostty 1.3.1과 비교)은 [`docs/benchmarks/2026-11-16.md`](docs/benchmarks/2026-11-16.md)에 있다.
 
 다시 재려면: `swiftc -O bench/plumbench.swift -o bench/plumbench && python3 bench/run.py all` (약 50분, 측정 창이 포커스를 가져간다). 비교할 Ghostty는 `PLUM_BENCH_GHOSTTY`로 정한다(자세히는 측정 문서).
 
 ## 아직 없는 것
 
-밝은 테마(만들었다가 뺐다), 한국어·영어 밖의 UI 언어, bash·fish의 프롬프트 표시, 서명·공증된 배포판(`release.sh`는 준비됨, Developer ID 인증서가 필요하다)과 스스로 설치하는 자동 업데이트, Intel Mac 빌드. 이유와 순서는 설계 문서 14장에 있다.
+밝은 테마(만들었다가 뺐다), 한국어·영어 밖의 UI 언어, bash·fish의 프롬프트 표시, 서명·공증된 배포판(`release.sh`는 준비됨, Developer ID 인증서가 필요하다), Intel Mac 빌드. 이유와 순서는 설계 문서 14장에 있다.
 
 ## 코드 구조
 
@@ -276,7 +291,7 @@ Sources/PlumKit/UI/            App(메뉴·알림·종료 확인), MainWindow(�
                                Sheets(대화상자 내용), AppActions(확인이 필요한 동작), Controls(버튼·상태 표시·토스트), Theme
 Sources/Plum/                  진입점
 Vendor/                        libghostty-vt xcframework (build-vt.sh가 생성, git에는 넣지 않음)
-scripts/                       build-vt.sh, bundle.sh, release.sh. readme-plum.py는 README 맨 위 자두(docs/assets/plum.svg)와 아이콘용 작은 자두(icon/AsciiPlumFrames.swift)를 그리고, make-icon.sh는 그것으로 앱 아이콘을 만든다
+scripts/                       build-vt.sh, bundle.sh, release.sh, update-signing.swift(업데이트 서명 키와 서명). readme-plum.py는 README 맨 위 자두(docs/assets/plum.svg)와 아이콘용 작은 자두(icon/AsciiPlumFrames.swift)를 그리고, make-icon.sh는 그것으로 앱 아이콘을 만든다
 ```
 
 VT 해석과 화면 상태는 [libghostty-vt](https://libghostty.tip.ghostty.org/) 1.0.1(MIT)에 맡기고, 렌더러·글꼴·입력·pty는 직접 만들었다. 외부 의존성은 이것 하나다.

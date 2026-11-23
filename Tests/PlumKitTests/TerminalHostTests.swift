@@ -84,6 +84,26 @@ final class TerminalHostTests: XCTestCase {
         wait("rebuilt from the output the host kept") { restored.screenText().contains("crash-42") }
     }
 
+    /// Input and output go through non-blocking descriptors: a paste larger
+    /// than every buffer on the way must wait for room, not lose bytes, and
+    /// output larger than them must arrive whole.
+    func testLargeInputAndOutputArriveWhole() throws {
+        let id = UUID()
+        let file = NSTemporaryDirectory() + "plum-paste-\(UUID().uuidString.prefix(8))"
+        defer { unlink(file) }
+        // Raw mode: no line editing or echo between the paste and `head`.
+        let opened = try XCTUnwrap(client.open(
+            id: id, workspace: UUID(), shell: "/bin/zsh", cwd: NSTemporaryDirectory(), environment: environment,
+            cols: 60, rows: 12, command: "stty raw -echo; head -c 1000000 > \(file); stty sane; echo pasted-$(wc -c < \(file) | tr -d ' ')"))
+        let session = attach(id, to: opened)
+        Thread.sleep(forTimeInterval: 0.5) // the command has started reading
+        session.write(Data(repeating: UInt8(ascii: "x"), count: 1_000_000))
+        wait("all of the paste reached the program") { session.screenText().contains("pasted-1000000") }
+
+        session.write("yes 0123456789 | head -c 3000000 | wc -c | sed 's/^ */out-/'; seq 1 20000 | tail -1\n")
+        wait("output went through whole") { session.screenText().contains("out-3000000") && session.screenText().contains("20000") }
+    }
+
     /// An agent that stops waiting for an answer while the app is away still
     /// shows as waiting when it comes back; what the app had seen to doesn't.
     func testTheAgentsLastStateIsKeptForTheApp() throws {

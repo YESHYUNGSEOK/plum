@@ -4,8 +4,8 @@
 
 <h1>Plum</h1>
 
-<p><b>AI coding agents side by side, each in a git worktree of its own.</b><br>
-A light, native macOS app.</p>
+<p><b>A terminal lighter and faster than Ghostty, with an agent workspace as handy as Orca.</b><br>
+A native macOS app for AI coding agents side by side, each in a git worktree of its own.</p>
 
 <p>
 <a href="#install"><img src="https://img.shields.io/badge/macOS-14%2B-1A1A1D?style=flat-square&logo=apple&logoColor=white" alt="macOS 14 or later"></a>
@@ -27,28 +27,30 @@ A light, native macOS app.</p>
 
 </div>
 
-A macOS app for running AI coding agents side by side. Add a project (a git repository), add a workspace, and Plum makes a git worktree for it and opens a terminal there, all in one window.
+As in Orca, add a project (a git repository), add a workspace, and Plum makes the branch, the worktree and a terminal for your agent, all in one window. And the terminal is lighter and faster than Ghostty: measured against the latest Ghostty (1.4.0) on the same Mac, taking turns, it uses a quarter of the memory (37 MB against 148 MB), puts a key press on screen in 18.5 ms against 24.0 ms, and handles all seven kinds of output 1.05-2.64x faster ([Performance](#performance)).
 
 Status: **0.1 (first public release)**. The design (in Korean) is in [`docs/superpowers/specs/2026-11-16-plum-design.md`](docs/superpowers/specs/2026-11-16-plum-design.md). The UI is in English and Korean, following the system language.
 
 ## At a glance
 
+- **Lighter and faster than Ghostty.** 37 MB of memory with one terminal and 49 MB with ten, a quarter of Ghostty's. 18.5 ms from key press to screen (Ghostty 24.0 ms), and ahead on all seven kinds of output, from 1.05x for plain text to 2.64x for dense colors. 1 ms of CPU per 30 s while idle.
 - **A worktree per workspace.** A new workspace gets a branch and a worktree, your `.env` files copied in, the setup command, then Claude or Codex in its first tab.
 - **Agents' state where you look.** Working, waiting, done and monitoring show as rings on tabs and in the sidebar; whatever needs you gathers at the top.
 - **Terminals that outlive the app.** Quit and start again: shells, agents and dev servers keep running, and screens and scrollback come back.
 - **A real terminal.** libghostty-vt underneath, drawn with Metal. Split panes, find, mouse reporting, OSC 8, 52 and 133.
 - **Changes and pull requests.** A diff of uncommitted work or the whole branch, PR state and checks in the sidebar, Create PR in one step.
-- **Small and quick.** 37 MB of memory with one terminal and 18.5 ms from key press to screen, against Ghostty's 148 MB and 24.0 ms ([Performance](#performance)).
 
 ## Install
 
 Download `Plum-<version>-arm64.zip` from the releases page, unzip it and move `Plum.app` to Applications. It runs on Apple Silicon Macs with macOS 14 or later.
 
-The app isn't signed with an Apple Developer ID or notarized yet, so macOS blocks it the first time. Control-click Plum in Finder and choose Open, or run once:
+The app isn't signed with an Apple Developer ID or notarized yet, so macOS blocks it the first time. Try opening it once, then click "Open Anyway" at the bottom of System Settings → Privacy & Security, or run once:
 
 ```sh
 xattr -dr com.apple.quarantine /Applications/Plum.app
 ```
+
+Later updates Plum downloads and installs itself.
 
 ## Build and run
 
@@ -59,10 +61,12 @@ You need macOS 14 or later and Xcode. Builds are checked on an Apple Silicon Mac
 ./scripts/bundle.sh     # makes build/Plum.app (release build, ad-hoc signature)
 open build/Plum.app
 swift test              # automated tests
-./scripts/release.sh    # build/Plum-<version>-<arch>.zip and its SHA-256
+./scripts/release.sh    # build/Plum-<version>-<arch>.zip, its update signature .sig, and its SHA-256
 ```
 
 `build-vt.sh` checks the Zig archive's SHA-256 and keeps what it downloads in `.tools/` (nothing is installed system-wide).
+
+Upload the zip and its `.sig` to the release. The `.sig` is made with the update key (`~/.config/plum/update-signing-key`, `scripts/update-signing.swift`); keep a backup, since copies already out install later releases only with it.
 
 To ship a build macOS opens directly, `release.sh` signs with the hardened runtime and notarizes when given `PLUM_SIGN_IDENTITY="Developer ID Application: …"` and `PLUM_NOTARY_PROFILE=<notarytool profile>`.
 
@@ -148,7 +152,7 @@ In dialogs Return is the default button and Esc cancels; while a dialog is open,
 - Show Changes ⇧⌘E (or click the +/− counts in the sidebar, or right-click a workspace): changed files and a diff with line numbers, either "Uncommitted" or "Whole Branch" (since it left its base branch, uncommitted work included). New files show too; each file draws up to 3000 lines.
 - Create PR (in Show Changes, or right-click a workspace): runs `gh pr create --web` in a new tab; gh asks there where to push, then GitHub's form opens in the browser.
 - Existing worktrees: adding a project brings in the worktrees its repository already has (made by hand or by another tool) as workspaces; later ones with "Import Existing Worktrees" on the project's right-click menu. Nothing on disk changes; worktrees without a branch are left out.
-- Updates: once a day Plum asks GitHub for a newer release and says so only when there is one; Plum → "Check for Updates…" asks now. It opens the download page; it doesn't replace itself (unsafe without a signed build). While the repository is private there is no release to find.
+- Updates: once a day Plum asks GitHub for a newer release and asks only when there is one; Plum → "Check for Updates…" asks now. "Install and Restart" downloads this Mac's zip, checks that its Ed25519 signature (the `.sig` uploaded with it) matches the public key in the app and that the app inside is Plum at that version, swaps it in in one step and opens it again. Terminals and the programs in them carry on. With a signature that doesn't match, a copy running from a place macOS chose, or a folder it can't change, it installs nothing and offers the download page. While the repository is private there is no release to find.
 - Trusted folders (on by default): before an agent tab opens, its folder is marked trusted for Claude (`hasTrustDialogAccepted` in `~/.claude.json`) and Codex (`[projects."<folder>"] trust_level = "trusted"` in `~/.codex/config.toml`), so a new worktree doesn't stop at "Do you trust this folder?". Claude's file is changed under Claude's own lock (`.claude.json.lock`), read again and swapped in whole; nothing is written when the file is missing or unreadable, and a folder Codex already lists is left as it is.
 
 The workspace selected last is selected again at the next launch.
@@ -184,31 +188,43 @@ The details, with dates and numbers, are in the [Korean README](README.ko.md#확
 - **Also checked**: the Korean input-method path (the calls an input method makes while composing and committing), double/triple click, drag selection, wheel scrolling, the screen right after switching workspaces (70 captures), the Dock badge, and (2026-11-20, in a test copy of the app) notifications for finished and waiting tabs through the older API, only the newest per tab staying in Notification Center. Pull request notifications have automated tests only.
 - **Sidebar details (2026-11-19)**: changed-line counts, pull request parsing, folded projects, tab titles, port detection and descriptor isolation have automated tests (40 in all); clicks, drags, menus and renaming were checked in the app with synthesized events, as were Plum's own right-click menus (workspace, project, main checkout, tab; submenus, Esc), renaming a tab by double-clicking it (the window keeps its size and place), and agent tabs' permission flags and trusted folders (against a temporary config folder). Trusting was also checked on a copy of a real `~/.claude.json`: apart from the added keys, the content came back the same. Not seen: whether a real Claude or Codex then skips its trust prompt. A bug from before was fixed: new shells inherited every descriptor the app had open, so a git command running as a tab opened kept the app waiting for its output forever.
 - **Terminals that outlive the app (2026-11-19)**: automated tests (44 in all) and quitting and relaunching the app with a stand-in agent and a web server running: everything listed above came back; the host used 4 MB with seven tabs attached. Heavy output through the host runs at 0.83× a direct pty (152 vs 183 MB/s).
-- **Not checked yet**: quitting and relaunching with a real Claude or Codex running, the sidebar with a real mouse (pull request badges were checked against real `gh` output from a clone of `cli/cli`), real Claude and Codex tab titles (checked with stand-in processes), typing Korean through the real macOS input method (Return while composing in particular), a real trackpad and mouse (all checks used synthesized events), Developer ID signing and notarization (no certificate here), Codex integration.
+- **Not checked yet**: quitting and relaunching with a real Claude or Codex running, the sidebar with a real mouse (pull request badges were checked against real `gh` output from a clone of `cli/cli`), real Claude and Codex tab titles (checked with stand-in processes), typing Korean through the real macOS input method (Return while composing in particular), a real trackpad and mouse (all checks used synthesized events), Developer ID signing and notarization (no certificate here), Codex integration, an update from a real GitHub release (a signed local zip went through the same install path in the test copy: a changed file and a wrong version were refused, the right one was swapped in and reopened with its terminals carrying on; the download and whether macOS asks for "App Management" when the app is in Applications were not checked).
 
 ## Performance
 
-Measured against Ghostty 1.4.0 (the latest) on the same Mac (M4 Pro, external 75 Hz display), in alternating runs; medians. Method, sample sizes and limits: [`docs/benchmarks/2026-11-17.md`](docs/benchmarks/2026-11-17.md).
+Ahead of the latest Ghostty (1.4.0) on memory, key latency and output throughput. Both apps were measured on the same Mac (M4 Pro, external 75 Hz display), taking turns.
+
+**Output throughput (2026-11-23).** The same data was sent to each app in turn, each brought to the front for its run so both drew. Six rounds per kind; the median of the per-round ratios.
+
+| Output | Plum ÷ Ghostty 1.4.0 |
+|---|---|
+| Dense colors (dense_cells) | **2.64x** |
+| Unicode (unicode) | **1.42x** |
+| Scrolling (scrolling) | **1.32x** |
+| Cursor movement (cursor_motion) | **1.29x** |
+| TUI redraw (sync_tui) | **1.17x** |
+| Scroll region (scroll_region) | **1.07x** (1.13x when measured again) |
+| Plain text (ascii) | **1.05x** (1.09x when measured again) |
+
+**Memory, latency, launch (2026-11-17, medians).**
 
 | | Plum | Ghostty 1.4.0 | Samples |
 |---|---|---|---|
-| App size | 3.0 MB | 67 MB | |
-| Launch → window | 284 ms | 346 ms | 15 each |
+| Memory, 1 terminal, idle | **37 MB** | 148 MB | 4 each |
+| Memory, 10 terminals | **49 MB** | 214 MB | 5 each |
+| Key press → on screen | **18.5 ms** | 24.0 ms | 400 each |
+| Idle CPU (30 s) | **1 ms** | 107 ms | 4 each |
+| Launch → window | **284 ms** | 346 ms | 15 each |
 | Launch → shell started | 243 ms | 226 ms | 15 each |
-| Output throughput, plain text | 119 MB/s | 254 MB/s | 10 each |
-| Output throughput, TUI redraw (sync_tui) | 119 MB/s | 156 MB/s | 10 each |
-| Output throughput, dense colors (dense_cells) | 137 MB/s | 90 MB/s | 10 each |
-| Key press → on screen | 18.5 ms | 24.0 ms | 400 each |
-| Memory, 1 terminal, idle | 37 MB | 148 MB | 4 each |
-| Memory, 10 terminals | 49 MB | 214 MB | 5 each |
-| Idle CPU (30 s) | 1 ms | 107 ms | 4 each |
+| App size | **3.0 MB** | 67 MB | |
 
-- Ghostty 1.4.0 is faster than Plum on plain text, scrolling and TUI redraws; Plum is faster on dense colors, Unicode and cursor movement. Plum's plain-text limit is in Plum, not in the pty; where exactly is not yet known.
+- Ghostty starts the shell 17 ms sooner.
 - Latency excludes keyboard and panel response.
+- Measured on one Mac. Per-round values and averages, method and limits: [`docs/benchmarks/2026-11-20.md`](docs/benchmarks/2026-11-20.md) (output, the optimizations in between, where the memory goes) and [`docs/benchmarks/2026-11-17.md`](docs/benchmarks/2026-11-17.md) (sample sizes, spread).
 
 ## Not there yet
 
-A light theme (built, then left out), UI languages other than English and Korean, prompt marks for bash and fish, signed and notarized releases (`release.sh` is ready; it needs a Developer ID certificate) and updates that install themselves, an Intel build. Why, and in what order: chapter 14 of the design document.
+A light theme (built, then left out), UI languages other than English and Korean, prompt marks for bash and fish, signed and notarized releases (`release.sh` is ready; it needs a Developer ID certificate), an Intel build. Why, and in what order: chapter 14 of the design document.
 
 ## Code
 
@@ -220,7 +236,7 @@ Sources/PlumKit/UI/            App (menus, notifications, quitting), MainWindow 
                                Sheets (dialog content), AppActions (actions that ask first), Controls, Theme
 Resources/                     app icon (made by scripts/make-icon.sh), en.lproj and ko.lproj UI strings
 Vendor/                        libghostty-vt xcframework (made by build-vt.sh, not in git)
-scripts/                       build-vt.sh, bundle.sh, release.sh; readme-plum.py draws the README's plum (docs/assets/plum.svg) and a small one for the icon (icon/AsciiPlumFrames.swift); make-icon.sh makes the app icon from it
+scripts/                       build-vt.sh, bundle.sh, release.sh, update-signing.swift (the update key and signatures); readme-plum.py draws the README's plum (docs/assets/plum.svg) and a small one for the icon (icon/AsciiPlumFrames.swift); make-icon.sh makes the app icon from it
 ```
 
 Terminal emulation is [libghostty-vt](https://libghostty.tip.ghostty.org/) 1.0.1 (MIT); the renderer, fonts, input and pty are Plum's own. That is the only dependency.
