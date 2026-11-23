@@ -44,7 +44,15 @@ Status: **0.1 (first public release)**. The design (in Korean) is in [`docs/supe
 
 ## Install
 
-Download `Plum-<version>-arm64.zip` from the releases page, unzip it and move `Plum.app` to Applications. It runs on Apple Silicon Macs with macOS 14 or later.
+With Homebrew:
+
+```sh
+brew install --cask yeshyungseok/tap/plum
+```
+
+It's a tap Homebrew hasn't seen, so it asks you to trust it first (`brew trust yeshyungseok/tap`). Installed this way, macOS doesn't block the first launch either, and Plum updates itself after that.
+
+Or download `Plum-<version>-arm64.zip` from the releases page, unzip it and move `Plum.app` to Applications. It runs on Apple Silicon Macs with macOS 14 or later.
 
 The app isn't signed with an Apple Developer ID or notarized yet, so macOS blocks it the first time. Try opening it once, then click "Open Anyway" at the bottom of System Settings → Privacy & Security, or run once:
 

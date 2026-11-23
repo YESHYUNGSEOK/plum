@@ -44,7 +44,15 @@ Orca처럼 프로젝트(git 저장소)를 등록하고 워크스페이스를 추
 
 ## 설치
 
-릴리스 페이지에서 `Plum-<버전>-arm64.zip`을 받아 풀고, `Plum.app`을 응용 프로그램 폴더로 옮긴다. Apple Silicon Mac, macOS 14 이상에서 돈다.
+Homebrew로:
+
+```sh
+brew install --cask yeshyungseok/tap/plum
+```
+
+처음 쓰는 tap이라 Homebrew가 `brew trust yeshyungseok/tap`으로 신뢰할지 묻는다. 이 방법이면 처음 열 때도 macOS가 막지 않는다. 그 뒤 업데이트는 Plum이 직접 한다.
+
+직접 받으려면: 릴리스 페이지에서 `Plum-<버전>-arm64.zip`을 받아 풀고, `Plum.app`을 응용 프로그램 폴더로 옮긴다. Apple Silicon Mac, macOS 14 이상에서 돈다.
 
 아직 Apple 개발자 서명과 공증을 하지 않아서, 처음 열 때 macOS가 막는다. 한 번 열어 보고 막히면 시스템 설정 → 개인정보 보호 및 보안 맨 아래의 "그래도 열기"를 누르거나, 터미널에서 한 번 실행한다. 그 뒤의 업데이트는 Plum이 직접 내려받아 설치한다.
 
