@@ -1,0 +1,19 @@
+docs/superpowers/specs/2026-11-23-orca-resume-design.md
+  s_a83df6962bacf1::t_11661904b213f4 1-80
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d4a3d4d62ae8618221292e2a2f24d9c200555678",
+  "prompts": {},
+  "sessions": {
+    "s_a83df6962bacf1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_a83df6962bacf1",
+        "model": "unknown"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    }
+  }
+}
