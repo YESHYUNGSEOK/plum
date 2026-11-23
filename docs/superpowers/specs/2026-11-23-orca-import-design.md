@@ -50,7 +50,7 @@ its source rather than guessed.
 
 ## Behavior
 
-- **Where:** a menu item, "Orca에서 가져오기…", always there. On a first launch
+- **Where:** a menu item, "Import from Orca…", always there. On a first launch
   with no projects, if Orca is installed, Plum offers it once.
 - **Finding the CLI:** Orca's app by its bundle id (`com.stablyai.orca`, via
   Launch Services), then `Contents/Resources/bin/orca` inside it, run by
@@ -67,7 +67,7 @@ its source rather than guessed.
   Archived ones are imported like the rest (they are still on disk).
 - **Result:** a notice (not an error): repositories and worktrees added, and
   how many were left out and why (detached, missing folder).
-- **When it can't:** Orca not running → "Orca를 켠 뒤 다시 시도해 주세요".
+- **When it can't:** Orca not running → "Open Orca, then try again."
   Output that isn't what's expected → nothing imported, and a message saying
   Orca's output wasn't understood, with Orca's version.
 

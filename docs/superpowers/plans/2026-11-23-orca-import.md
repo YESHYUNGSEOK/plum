@@ -33,10 +33,10 @@
 
 Three finished fixes are uncommitted in the working tree; commit them apart from this feature, one each.
 
-- [ ] **Step 1:** `git add Sources/PlumKit/Model/StatusServer.swift Sources/PlumKit/Model/AppModel.swift Tests/PlumKitTests/CodexHooksTests.swift` → commit "Codex: 끊어진 서버 소켓 링크를 시작 전에 정리".
-- [ ] **Step 2:** `git add Sources/PlumKit/Terminal/TerminalView.swift Tests/PlumKitTests/TerminalMoreTests.swift` → commit "워크스페이스 전환 때 터미널 크기를 두 번 바꾸던 것".
-- [ ] **Step 3:** `git add Sources/PlumKit/UI/Dropdown.swift` → commit "드롭다운: 내용이 모서리에서 날아오던 것".
-- [ ] **Step 4:** add the spec and this plan → commit "Orca 가져오기: 설계와 계획". Every commit ends with `Co-authored-by: Claude <noreply@anthropic.com>`. Use `/usr/bin/git`. Do not push.
+- [ ] **Step 1:** `git add Sources/PlumKit/Model/StatusServer.swift Sources/PlumKit/Model/AppModel.swift Tests/PlumKitTests/CodexHooksTests.swift` → commit "Codex: clear stale server socket links before starting".
+- [ ] **Step 2:** `git add Sources/PlumKit/Terminal/TerminalView.swift Tests/PlumKitTests/TerminalMoreTests.swift` → commit "Terminal resized twice on switching workspaces".
+- [ ] **Step 3:** `git add Sources/PlumKit/UI/Dropdown.swift` → commit "Dropdown: content flew in from the corner".
+- [ ] **Step 4:** add the spec and this plan → commit "Orca import: design and plan". Every commit ends with `Co-authored-by: Claude <noreply@anthropic.com>`. Use `/usr/bin/git`. Do not push.
 
 ### Task 1: Parse Orca's output
 
@@ -69,7 +69,7 @@ Rules for `parse` (from the spec): top level must be an object with `ok`; `ok:fa
 - [ ] **Step 2:** `swift test --filter OrcaImportTests` → fails to compile (`OrcaImport` not found).
 - [ ] **Step 3:** Implement the types and `parse(repos:worktrees:)` in `OrcaImport.swift` with `JSONSerialization` (no Codable models of Orca's whole schema: only the fields above are read, the rest ignored).
 - [ ] **Step 4:** `swift test --filter OrcaImportTests` → 5 tests pass.
-- [ ] **Step 5:** Commit "Orca 가져오기: CLI 출력 해석".
+- [ ] **Step 5:** Commit "Orca import: parse the CLI output".
 
 ### Task 2: Run the CLI and check paths
 
@@ -98,7 +98,7 @@ Rules for `parse` (from the spec): top level must be an object with `ok`; `ok:fa
 - [ ] **Step 2:** `swift test --filter OrcaImportTests` → the 3 new tests fail (no `load`).
 - [ ] **Step 3:** Implement `cli()`, `version()`, `load(cli:timeout:)`.
 - [ ] **Step 4:** `swift test --filter OrcaImportTests` → 8 tests pass.
-- [ ] **Step 5:** Commit "Orca 가져오기: CLI 실행과 경로 확인".
+- [ ] **Step 5:** Commit "Orca import: run the CLI and check paths".
 
 ### Task 3: Import a catalog into Plum's state
 
@@ -119,7 +119,7 @@ Behavior: for each repo, a project with the same path is reused untouched; other
 - [ ] **Step 2:** `swift test --filter OrcaImportTests` → the 3 new tests fail.
 - [ ] **Step 3:** Implement `importFromOrca(_:)` and the two helpers.
 - [ ] **Step 4:** `swift test` → all pass (92 before this feature + 11 new).
-- [ ] **Step 5:** Commit "Orca 가져오기: 프로젝트와 워크스페이스로 옮기기".
+- [ ] **Step 5:** Commit "Orca import: bring into projects and workspaces".
 
 ### Task 4: Menu, offer, messages, debug command
 
@@ -130,14 +130,14 @@ Behavior: for each repo, a project with the same path is reused untouched; other
 - Consumes: `OrcaImport.cli()`, `.version()`, `.load(cli:)`, `AppModel.importFromOrca(_:)`, `AppActions.ask`, `Confirmation`.
 - Produces: `static func importFromOrca(_ model: AppModel, quietly: Bool) async` in `AppActions`.
 
-Flow: no CLI → (`quietly` ? nothing : error "Orca가 설치되어 있지 않습니다."). `load` → `.notRunning`: quietly nothing, else error "Orca를 켠 뒤 다시 시도해 주세요."; `.unreadable`: quietly nothing, else error "Orca의 출력을 읽지 못해 가져오지 않았습니다 (Orca \(version))." Empty catalog: quietly nothing, else notice "Orca에 가져올 저장소가 없습니다." Otherwise ask `Confirmation(title: "Orca에서 가져올까요?", summary: "저장소 \(repos)개와 워크트리 \(worktrees)개를 Plum 목록에 더합니다. 디스크의 파일은 바뀌지 않습니다.", sections: [.init(title: "저장소", lines: repo names)], action: "가져오기", destructive: false)`; yes → import → notice "저장소 \(projects)개와 워크트리 \(workspaces)개를 가져왔습니다." plus, when `detached + missing > 0`, " 브랜치가 없는 워크트리 \(detached)개와 폴더가 없는 워크트리 \(missing)개는 건너뛰었습니다."
+Flow: no CLI → (`quietly` ? nothing : error "Orca isn't installed."). `load` → `.notRunning`: quietly nothing, else error "Open Orca, then try again."; `.unreadable`: quietly nothing, else error "Couldn't read Orca's output, so nothing was imported (Orca \(version))." Empty catalog: quietly nothing, else notice "Orca has no repositories to import." Otherwise ask `Confirmation(title: "Import from Orca?", summary: "Adds \(repos) repositories and \(worktrees) worktrees to Plum's list. Nothing on disk changes.", sections: [.init(title: "Repositories", lines: repo names)], action: "Import", destructive: false)`; yes → import → notice "Imported \(projects) repositories and \(workspaces) worktrees." plus, when `detached + missing > 0`, " Skipped \(detached) worktrees without a branch and \(missing) whose folder is gone."
 
-English (add each to `Localizable.strings`, checking the key isn't there already): "Orca에서 가져오기…" = "Import from Orca…"; "Orca가 설치되어 있지 않습니다." = "Orca isn't installed."; "Orca를 켠 뒤 다시 시도해 주세요." = "Open Orca, then try again."; "Orca의 출력을 읽지 못해 가져오지 않았습니다 (Orca %@)." = "Couldn't read Orca's output, so nothing was imported (Orca %@)."; "Orca에 가져올 저장소가 없습니다." = "Orca has no repositories to import."; "Orca에서 가져올까요?" = "Import from Orca?"; summary = "Adds %lld repositories and %lld worktrees to Plum's list. Nothing on disk changes."; "저장소" = "Repositories"; "가져오기" = "Import"; result = "Imported %lld repositories and %lld worktrees."; skipped = " Skipped %lld worktrees without a branch and %lld whose folder is gone."
+The strings above are shown in English; in the source they are Korean, the UI's key language. Keys and their English (add each to `Localizable.strings`, checking the key isn't there already): "Orca에서 가져오기…" = "Import from Orca…"; "Orca가 설치되어 있지 않습니다." = "Orca isn't installed."; "Orca를 켠 뒤 다시 시도해 주세요." = "Open Orca, then try again."; "Orca의 출력을 읽지 못해 가져오지 않았습니다 (Orca %@)." = "Couldn't read Orca's output, so nothing was imported (Orca %@)."; "Orca에 가져올 저장소가 없습니다." = "Orca has no repositories to import."; "Orca에서 가져올까요?" = "Import from Orca?"; summary = "Adds %lld repositories and %lld worktrees to Plum's list. Nothing on disk changes."; "저장소" = "Repositories"; "가져오기" = "Import"; result = "Imported %lld repositories and %lld worktrees."; skipped = " Skipped %lld worktrees without a branch and %lld whose folder is gone."
 
 - [ ] **Step 1:** `AppActions.importFromOrca(_:quietly:)` as above.
-- [ ] **Step 2:** File menu item "Orca에서 가져오기…" right after "프로젝트 추가…", `@objc private func importFromOrca()` → `Task { await AppActions.importFromOrca(model, quietly: false) }`.
+- [ ] **Step 2:** File menu item "Import from Orca…" right after "Add Project…", `@objc private func importFromOrca()` → `Task { await AppActions.importFromOrca(model, quietly: false) }`.
 - [ ] **Step 3:** First-launch offer after the daily update check: `if !debug, model.state.projects.isEmpty, !UserDefaults.standard.bool(forKey: "offeredOrcaImport"), OrcaImport.cli() != nil` → set `offeredOrcaImport` true, `Task { await AppActions.importFromOrca(model, quietly: true) }`.
 - [ ] **Step 4:** Debug command `case "import-orca": // imports from Orca without asking (its CLI, read-only); the result lands in "result"` → runs `cli()`/`load`/`importFromOrca` in a `Task`, sets `debugResult` to `"projects=N workspaces=M detached=D missing=K"` or the failure, returns `"started"`.
 - [ ] **Step 5:** Strings and README: one line under "Using it" in both READMEs (File → Import from Orca…, needs Orca running, nothing on disk changes).
-- [ ] **Step 6: Verify.** `swift build` clean; `swift test` all pass; `debug menus` in the test copy lists "Orca에서 가져오기…" under 파일. In the test copy (temp state, `harness/start.sh`), `debug import-orca`, then `debug state`: the projects and workspaces match what `orca repo list --json` / `orca worktree list --json` show on this Mac minus folder/hidden repos, main checkouts and detached worktrees. Read-only against the real Orca; quit the test copy afterwards.
-- [ ] **Step 7:** Commit "Orca 가져오기: 메뉴, 첫 실행 제안, 안내 문구".
+- [ ] **Step 6: Verify.** `swift build` clean; `swift test` all pass; `debug menus` in the test copy lists "Import from Orca…" under File. In the test copy (temp state, `harness/start.sh`), `debug import-orca`, then `debug state`: the projects and workspaces match what `orca repo list --json` / `orca worktree list --json` show on this Mac minus folder/hidden repos, main checkouts and detached worktrees. Read-only against the real Orca; quit the test copy afterwards.
+- [ ] **Step 7:** Commit "Orca import: menu, first-launch offer, messages".

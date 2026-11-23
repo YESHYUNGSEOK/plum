@@ -10,7 +10,7 @@ ZIG_VERSION="0.17.0"
 
 case "$(uname -m)" in
   arm64)  ZIG_ARCH="aarch64"; ZIG_SHA="b607e9b9234790a008116ae5bdb71c6243b84b9fb42a53a9e70fde41c06c536a" ;;
-  *) echo "지원하지 않는 CPU: $(uname -m) (Zig 체크섬을 추가해야 합니다)" >&2; exit 1 ;;
+  *) echo "Unsupported CPU: $(uname -m) (its Zig checksum needs adding)" >&2; exit 1 ;;
 esac
 ZIG_DIR="$TOOLS/zig-$ZIG_ARCH-macos-$ZIG_VERSION"
 SRC="$TOOLS/ghostty-src"

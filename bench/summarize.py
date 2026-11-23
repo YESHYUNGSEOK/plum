@@ -53,20 +53,20 @@ def apps_in(table):
 out = []
 env = os.path.join(folder, "env.txt")
 if os.path.exists(env):
-    out += ["## 측정 환경", "", "```", open(env).read().strip(), "```", ""]
+    out += ["## Environment", "", "```", open(env).read().strip(), "```", ""]
 
-out += ["표의 값은 **중앙값** [1사분위–3사분위] (최소–최대), n=표본 수 형식이다.", ""]
+out += ["Values are the **median** [Q1–Q3] (min–max), n = number of samples.", ""]
 
 launch = [r for r in rows("launch") if r["run"] != "0"]
 if launch:
     dropped = sum(1 for r in launch if r["valid"] != "yes")
     launch = [r for r in launch if r["valid"] == "yes"]
     apps = apps_in(launch)
-    out += ["## 실행 시간 (ms)", "", "| 구간 | " + " | ".join(NAMES[a] for a in apps) + " |", "|---|" + "---|" * len(apps)]
-    for key, label in (("window_ms", "실행 요청 → 창이 화면에 뜸"), ("child_ms", "실행 요청 → 셸 프로세스 시작")):
+    out += ["## Launch time (ms)", "", "| Interval | " + " | ".join(NAMES[a] for a in apps) + " |", "|---|" + "---|" * len(apps)]
+    for key, label in (("window_ms", "Launch request → window on screen"), ("child_ms", "Launch request → shell process started")):
         cells = [describe([float(r[key]) for r in launch if r["app"] == a and r[key]], 0) for a in apps]
         out.append(f"| {label} | " + " | ".join(cells) + " |")
-    out += ["", f"제외한 표본: {dropped}개 (창이 화면에 보이지 않음).", ""]
+    out += ["", f"Samples left out: {dropped} (window not on screen).", ""]
 
 throughput = [r for r in rows("throughput") if r["run"] != "0"]
 if throughput:
@@ -74,30 +74,30 @@ if throughput:
     throughput = [r for r in throughput if r["valid"] == "yes"]
     apps = apps_in(throughput)
     others = [a for a in apps if a != "plum"]
-    out += ["## 출력 처리 속도 (MB/s, 클수록 빠름)", "",
-            "| 데이터 | " + " | ".join(NAMES[a] for a in apps) + " | " + " | ".join(f"Plum ÷ {NAMES[a]}" for a in others) + " |",
+    out += ["## Output throughput (MB/s, higher is faster)", "",
+            "| Data | " + " | ".join(NAMES[a] for a in apps) + " | " + " | ".join(f"Plum ÷ {NAMES[a]}" for a in others) + " |",
             "|---|" + "---|" * (len(apps) + len(others))]
     for dataset in dict.fromkeys(r["dataset"] for r in throughput):
         speed = {a: [float(r["mb_per_s"]) for r in throughput if r["dataset"] == dataset and r["app"] == a] for a in apps}
         out.append(f"| {dataset} | " + " | ".join(describe(speed[a], 0) for a in apps) + " | "
                    + " | ".join(ratio(speed["plum"], speed[a]) for a in others) + " |")
-    out += ["", f"제외한 표본: {dropped}개 (측정 중 다른 앱이 앞에 있었음).", ""]
+    out += ["", f"Samples left out: {dropped} (another app was in front during the run).", ""]
 
-for name, title in (("latency", "키 입력 → 화면 표시 지연, 연속 입력 (ms, 작을수록 빠름)"),
-                    ("latency_idle", "키 입력 → 화면 표시 지연, 5초 쉬고 난 첫 키 (ms)")):
+for name, title in (("latency", "Key press → on screen latency, continuous typing (ms, lower is faster)"),
+                    ("latency_idle", "Key press → on screen latency, first key after 5 s idle (ms)")):
     latency = rows(name)
     if not latency:
         continue
     apps = apps_in(latency)
     out += [f"## {title}", "", "| | " + " | ".join(NAMES[a] for a in apps) + " |", "|---|" + "---|" * len(apps)]
     values = {app: sorted(float(r["latency_ms"]) for r in latency if r["app"] == app) for app in apps}
-    out.append("| 중앙값 [사분위] (범위) | " + " | ".join(describe(values[a]) for a in apps) + " |")
-    for label, pick in (("평균", statistics.mean), ("95번째 백분위", lambda v: v[int(len(v) * 0.95) - 1])):
+    out.append("| Median [quartiles] (range) | " + " | ".join(describe(values[a]) for a in apps) + " |")
+    for label, pick in (("Mean", statistics.mean), ("95th percentile", lambda v: v[int(len(v) * 0.95) - 1])):
         out.append(f"| {label} | " + " | ".join(f"{pick(values[a]):.1f}" if values[a] else "—" for a in apps) + " |")
     out.append("")
     # Per block, to show whether the difference holds each time or only on average.
     blocks = sorted({int(r["block"]) for r in latency})
-    out += ["블록별 중앙값 (두 앱을 번갈아 측정):", "", "| 블록 | " + " | ".join(str(b) for b in blocks) + " |",
+    out += ["Median per block (the apps measured in turn):", "", "| Block | " + " | ".join(str(b) for b in blocks) + " |",
             "|---|" + "---|" * len(blocks)]
     for app in apps:
         cells = []
@@ -112,27 +112,27 @@ if memory:
     dropped = sum(1 for r in memory if r["valid"] != "yes")
     memory = [r for r in memory if r["valid"] == "yes"]
     variants = list(dict.fromkeys(r["variant"] for r in memory))
-    out += ["## 메모리와 유휴 CPU (터미널 1개, 화면에 보이는 상태)", "",
-            "| 항목 | " + " | ".join(variants) + " |", "|---|" + "---|" * len(variants)]
-    for key, label, digits in (("fp_10s_mb", "실행 10초 뒤 메모리 (MB)", 1), ("fp_60s_mb", "실행 60초 뒤 메모리 (MB)", 1),
-                               ("peak_mb", "최대 메모리 (MB)", 1), ("idle_cpu_ms_per_30s", "유휴 30초 동안 쓴 CPU (ms)", 0)):
+    out += ["## Memory and idle CPU (1 terminal, on screen)", "",
+            "| Measure | " + " | ".join(variants) + " |", "|---|" + "---|" * len(variants)]
+    for key, label, digits in (("fp_10s_mb", "Memory 10 s after launch (MB)", 1), ("fp_60s_mb", "Memory 60 s after launch (MB)", 1),
+                               ("peak_mb", "Peak memory (MB)", 1), ("idle_cpu_ms_per_30s", "CPU used in 30 s idle (ms)", 0)):
         cells = [describe([float(r[key]) for r in memory if r["variant"] == v], digits) for v in variants]
         out.append(f"| {label} | " + " | ".join(cells) + " |")
-    out += ["", f"제외한 표본: {dropped}개.", ""]
+    out += ["", f"Samples left out: {dropped}.", ""]
 
 tabs = rows("tabs")
 if tabs:
     apps = apps_in(tabs)
-    out += ["## 터미널 10개", "", "| 항목 | " + " | ".join(NAMES[a] for a in apps) + " |", "|---|" + "---|" * len(apps)]
-    for key, label in (("fp_1_mb", "터미널 1개일 때 (MB)"), ("fp_10_mb", "터미널 10개일 때 (MB)")):
+    out += ["## 10 terminals", "", "| Measure | " + " | ".join(NAMES[a] for a in apps) + " |", "|---|" + "---|" * len(apps)]
+    for key, label in (("fp_1_mb", "With 1 terminal (MB)"), ("fp_10_mb", "With 10 terminals (MB)")):
         cells = [describe([float(r[key]) for r in tabs if r["app"] == app and r["terminals"] == "10"]) for app in apps]
         out.append(f"| {label} | " + " | ".join(cells) + " |")
-    wrong = [f"{r['app']} {r['terminals']}개" for r in tabs if r["terminals"] != "10"]
-    out += ["", "터미널이 10개가 아니었던 실행(제외): " + (", ".join(wrong) if wrong else "없음") + ".", ""]
+    wrong = [f"{r['app']} with {r['terminals']}" for r in tabs if r["terminals"] != "10"]
+    out += ["", "Runs without 10 terminals (left out): " + (", ".join(wrong) if wrong else "none") + ".", ""]
 
 after = rows("memory_after_output")
 if after:
-    out += ["## 대량 출력 뒤 메모리 (스크롤백이 찬 상태, 1회)", "", "| 앱 | 메모리 (MB) | 최대 (MB) |", "|---|---|---|"]
+    out += ["## Memory after heavy output (scrollback full, 1 run)", "", "| App | Memory (MB) | Peak (MB) |", "|---|---|---|"]
     out += [f"| {r['app']} | {r['footprint_mb']} | {r['peak_mb']} |" for r in after]
     out.append("")
 

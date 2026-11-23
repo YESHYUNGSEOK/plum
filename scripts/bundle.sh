@@ -27,7 +27,7 @@ if xcrun -sdk macosx -f metal >/dev/null 2>&1; then
   xcrun -sdk macosx metallib "$TMP/shader.air" -o "$APP/Contents/Resources/default.metallib"
   rm -rf "$TMP"
 else
-  echo "metal 컴파일러가 없어 셰이더를 실행 시 컴파일합니다." >&2
+  echo "No metal compiler; the shaders will be compiled at launch." >&2
 fi
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'

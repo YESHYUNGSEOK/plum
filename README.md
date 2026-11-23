@@ -31,7 +31,7 @@ As in Orca, add a project (a git repository), add a workspace, and Plum makes th
 
 <p align="center"><img src="docs/assets/bench.svg" width="860" alt="Plum against Ghostty 1.4.0. Memory with 1 terminal 37 MB against 148 MB, with 10 terminals 49 MB against 214 MB, key press to screen 18.5 ms against 24.0 ms, idle CPU per 30 s 1 ms against 107 ms, output throughput with Ghostty as 1: dense colors 2.64, Unicode 1.42, scrolling 1.32, cursor movement 1.29, TUI redraw 1.17, scroll region 1.07, plain text 1.05"></p>
 
-Status: **0.1 (first public release)**. The design (in Korean) is in [`docs/superpowers/specs/2026-11-16-plum-design.md`](docs/superpowers/specs/2026-11-16-plum-design.md). The UI is in English and Korean, following the system language unless you pick one in Settings.
+Status: **0.1 (first public release)**. The design is in [`docs/superpowers/specs/2026-11-16-plum-design.md`](docs/superpowers/specs/2026-11-16-plum-design.md). The UI is in English and Korean, following the system language unless you pick one in Settings.
 
 ## At a glance
 
@@ -195,7 +195,7 @@ Plum sets `PLUM_SOCKET`, `PLUM_TAB_ID` and `PLUM_CLAUDE_SETTINGS` in every termi
 
 ## What has been checked, and what hasn't
 
-The details, with dates and numbers, are in the [Korean README](README.ko.md#확인한-것과-확인하지-못한-것). In short:
+The details, with dates and numbers, are in [`docs/verification.md`](docs/verification.md). In short:
 
 - **Checked by running it**: worktree creation, file copying, archive/restore/delete with the data-loss checks (automated tests); rendering of styles, colors, Korean and emoji, vim and Claude Code screens; key encoding; agent status from hooks, OSC 7501 and the bell; drawing only while visible; every dialog, the quit and paste confirmations, links, and every shortcut in the table above, sent through the app's real event path; the English UI; a hardened-runtime build.
 - **Dialogs no longer stall the app**: macOS sheets held the main thread about 0.3 s on every open and close (terminal output froze meanwhile). Dialogs are now drawn in the window and animated by Core Animation: the longest stall went from 354 ms to 52 ms (new workspace palette), 331 → 40 ms (settings) and 316 → 18 ms (delete confirmation), measured under a tab title changing ten times a second.

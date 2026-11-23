@@ -1,262 +1,262 @@
-# Plum 설계 문서
+# Plum design document
 
-작성일: 2026-11-16
-상태: 확정 — 사용자가 "설계를 완성하고 프로토타입까지 개발"하도록 위임함. 열려 있던 질문은 작성자(Claude)가 근거와 함께 결정했고 15장에 모아 두었다. 사용자는 언제든 뒤집을 수 있다.
+Written: 2026-11-16
+Status: settled. The user delegated "finishing the design and building a prototype". The author (Claude) decided the open questions, with reasons, and collected them in chapter 15. The user can overturn any of them at any time.
 
-표기: **[결정]** = 사용자가 정한 것, **[제안]** = 작성자가 채운 것, **[빌더]** = 구현 중에 정한 것.
+Notation: **[Decision]** = decided by the user, **[Proposal]** = filled in by the author, **[Builder]** = decided during implementation.
 
 ---
 
-## 1. 의도와 이유
+## 1. Intent and reasons
 
-사용자는 Orca(1.4.259, Electron, 앱 726MB)로 저장소마다 여러 AI 코딩 에이전트(Claude Code, Codex)를 워크트리별로 병렬 실행하고 있다. Orca는 플러그인·자동화·SSH·VM·계정·아티팩트·Linear 연동까지 담고 있어 무겁다.
+The user runs several AI coding agents (Claude Code, Codex) in parallel per repository, one per worktree, with Orca (1.4.259, Electron, a 726 MB app). Orca carries plugins, automation, SSH, VMs, accounts, artifacts and Linear integration, and it is heavy.
 
-Plum은 Orca의 핵심만 남긴 macOS 네이티브 앱이다.
+Plum is a native macOS app that keeps only Orca's core.
 
-- 프로젝트(로컬 git 저장소)를 등록한다.
-- 프로젝트에 워크스페이스를 추가하면 앱이 git worktree를 만들고, 준비 작업을 실행하고, 그 경로에서 터미널을 연다.
-- 앱 안의 터미널에서 에이전트를 돌리고, 각 에이전트의 상태(작업 중, 입력 대기, 완료)를 사이드바와 알림으로 보여 준다.
-- Ghostty(62MB, 네이티브)만큼 가볍고, 가능하면 더 빠르다.
+- Add a project (a local git repository).
+- Add a workspace to a project, and the app makes a git worktree, runs the setup, and opens a terminal at that path.
+- Run agents in the app's terminals, and show each agent's state (working, waiting for input, done) in the sidebar and in notifications.
+- As light as Ghostty (62 MB, native), and faster where possible.
 
-## 2. 목표
+## 2. Goals
 
-1. **[결정]** 프로젝트 등록 → 워크스페이스 추가 시 worktree 자동 생성.
-2. **[결정]** 워크스페이스 생성 시 앱이 준비 작업까지 직접 실행 (6.3).
-3. **[결정]** 터미널을 앱 안에 내장한다. 외부 터미널 앱을 띄우지 않는다.
-4. **[결정]** 에이전트 상태를 앱이 보여 준다.
-5. **[결정]** 워크스페이스 아카이브/삭제 시 해당 worktree를 자동 제거한다. 정리 시점은 사용자가 정한다.
-6. **[결정]** macOS 전용.
-7. **[결정]** Ghostty 앱이 설치되어 있지 않아도 동작한다.
-8. **[제안]** 한글 입력(IME 조합 중 표시 포함)과 한글·이모지 폭이 정확하다.
-9. **[제안]** 성능: 9장의 측정 항목에서 Ghostty보다 나쁘지 않을 것(기준선). 더 빠른 것은 지향점이다. 사용자 표현이 "Ghostty만큼 가볍게", "더 빠르면 더 좋아"였기 때문이다.
+1. **[Decision]** Adding a workspace to a project makes the worktree automatically.
+2. **[Decision]** When a workspace is made, the app runs the setup itself (6.3).
+3. **[Decision]** The terminal is built into the app. No external terminal app is launched.
+4. **[Decision]** The app shows agents' state.
+5. **[Decision]** Archiving or deleting a workspace removes its worktree automatically. The user decides when to clean up.
+6. **[Decision]** macOS only.
+7. **[Decision]** Works without the Ghostty app installed.
+8. **[Proposal]** Korean input (including what's shown while the IME composes) and the widths of Korean and emoji are right.
+9. **[Proposal]** Performance: no worse than Ghostty on the measures in chapter 9 (the baseline). Faster is the aim. The user's words were "as light as Ghostty" and "faster would be even better".
 
-## 3. 비목표 (v1에서 하지 않음)
+## 3. Non-goals (not in v1)
 
-**[제안]** — 넣는 순간 Orca처럼 무거워지는 것들.
+**[Proposal]** The things that would make it as heavy as Orca the moment they go in.
 
-- 플러그인, 자동화/스케줄, SSH·원격 호스트, VM 환경, 에이전트 계정 관리, 아티팩트, Linear/GitHub 이슈 연동
-- PR 머지 감지 등 자동 정리 (**[결정]** 사용자가 명시적으로 거부)
-- 원격 저장소 URL로 클론해서 등록 (로컬 폴더 등록만)
-- 기존 worktree(Orca가 만든 것 등) 가져오기 (15장-3)
-- 터미널 화면 분할(split). 탭만 지원
-- ~~앱 종료 후에도 터미널 세션 유지 (15장-1)~~ 2026-11-19에 넣음(15장-1)
-- Ghostty 설정 파일(`~/.config/ghostty/config`) 호환
+- Plugins, automation/schedules, SSH and remote hosts, VM environments, agent account management, artifacts, Linear/GitHub issue integration
+- Automatic cleanup such as detecting merged PRs (**[Decision]** the user explicitly turned it down)
+- Cloning from a remote URL to add a project (adding a local folder only)
+- Importing existing worktrees (ones Orca made, for instance) (15-3)
+- Split panes. Tabs only
+- ~~Keeping terminal sessions after the app quits (15-1)~~ added 2026-11-19 (15-1)
+- Compatibility with Ghostty's config file (`~/.config/ghostty/config`)
 - Windows/Linux
-- 이미지 프로토콜(Kitty graphics, Sixel), 리거처
+- Image protocols (Kitty graphics, Sixel), ligatures
 
-## 4. 안티 목표 (기술적으로 돌아가도 실패인 것)
+## 4. Anti-goals (failures even if they technically work)
 
-- 커밋 안 된 변경이나 푸시 안 된 커밋이 경고 없이 사라진다.
-- 같은 머신에서 Ghostty보다 입력 반응이 느리거나, 터미널 10개 기준 메모리를 더 쓴다.
-- 한글 입력이 깨지거나 조합 중 글자가 안 보인다.
-- 기능이 계속 붙어 Orca의 축소판이 된다.
-- 사용자의 전역 설정 파일을 동의 없이 고친다.
+- Uncommitted changes or unpushed commits disappear without a warning.
+- On the same machine, input responds slower than Ghostty, or ten terminals use more memory.
+- Korean input breaks, or the characters being composed don't show.
+- Features keep piling on until it's a smaller Orca.
+- The user's global config files are changed without consent.
 
-## 5. 접근 방식
+## 5. Approach
 
-| 방법 | 내용 | 버린 이유 / 선택 이유 |
+| Approach | What it is | Why dropped / why chosen |
 |---|---|---|
-| Electron | Orca와 동일 계열 | 목표와 정반대 |
-| Tauri + xterm.js | Rust + 시스템 웹뷰 | 터미널이 웹뷰 안에서 돌아 다수 터미널의 메모리·입력 지연이 불리 |
-| Swift + SwiftTerm | 순수 Swift 터미널 패키지 | 붙이기 쉬우나 Ghostty 엔진만큼 검증되지 않음 |
-| Swift + libghostty (내부 embedder API, `ghostty.h`) | Ghostty 앱과 동일한 전체 엔진 | Ghostty가 외부용이 아니라고 밝힌 API. 버전 고정·업데이트마다 수동 대응 |
-| 완전 자체 엔진 | 파서·상태·렌더러 모두 직접 | 시간 대부분이 속도가 아닌 호환성 롱테일에 들어감 |
-| **Swift + libghostty-vt 1.0 + 자체 Metal 렌더러** | VT 파싱·화면 상태는 공식 라이브러리, 렌더링·글꼴·입력·PTY는 직접 | **[결정] 선택** |
+| Electron | Same family as Orca | The opposite of the goal |
+| Tauri + xterm.js | Rust + the system web view | Terminals run inside a web view, a handicap for memory and input latency with many terminals |
+| Swift + SwiftTerm | A pure Swift terminal package | Easy to wire up, but not as proven as Ghostty's engine |
+| Swift + libghostty (internal embedder API, `ghostty.h`) | The whole engine the Ghostty app uses | An API Ghostty says isn't for outside use. Pinned versions and manual work on every update |
+| An engine entirely our own | Parser, state and renderer all written here | Most of the time would go to the long tail of compatibility, not to speed |
+| **Swift + libghostty-vt 1.0 + our own Metal renderer** | The official library for VT parsing and screen state; rendering, fonts, input and the PTY written here | **[Decision] chosen** |
 
-선택 이유:
-- libghostty-vt 1.0(2026-11-06 출시, 사용 버전 1.0.1)은 C ABI 안정성을 공식 보장하고, libc 외 의존성이 없으며, MIT 라이선스다.
-- 가장 틀리기 쉬운 부분(제어 시퀀스 호환성)을 검증된 코드에 맡긴다.
-- Ghostty를 이길 여지가 있는 부분(Mac 전용으로 단순화한 렌더러, 시작 시간, 터미널당 메모리)은 직접 만든다.
-- 렌더러는 반드시 자체 구현이다(**[결정]**). Ghostty 쪽이 예고한 Swift Metal 렌더러 패키지는 출시되더라도 성능 비교 대상으로만 쓴다.
+Why:
+- libghostty-vt 1.0 (released 2026-11-06, 1.0.1 in use) officially guarantees C ABI stability, has no dependencies beyond libc, and is MIT licensed.
+- The easiest part to get wrong (control sequence compatibility) is left to proven code.
+- The parts where Ghostty can be beaten (a renderer simplified for the Mac only, launch time, memory per terminal) are written here.
+- The renderer must be our own (**[Decision]**). The Swift Metal renderer package Ghostty has announced, if it ships, is only a point of comparison for performance.
 
-소스에서 확인한 사실(`vt-1.0.1` 태그):
-- 빌드: Zig 0.17.0, `zig build -Demit-lib-vt -Demit-xcframework=true -Doptimize=ReleaseFast` → `ghostty-vt.xcframework`(macOS arm64+x86_64), Swift 모듈 이름 `GhosttyVt`.
-- 렌더러용 API(`render.h`): 프레임 스냅샷(render state), 줄 단위 dirty 추적, 커서·색·선택 범위 제공. IO 스레드와 렌더 스레드를 나누는 2단계 업데이트 지원.
-- 입력 API: 키 인코더(Kitty 키보드 프로토콜 포함), 마우스 인코더, 붙여넣기(bracketed paste 처리 포함).
-- 콜백: PTY 응답 쓰기, 벨, 제목, cwd(OSC 7), 데스크톱 알림(OSC 9/777), 진행률(OSC 9;4), 클립보드(OSC 52), 동기 출력 구간(mode 2026), **프로그램 상태(OSC 7501: idle/working/done/blocked/error)**.
+Facts checked in the source (tag `vt-1.0.1`):
+- Build: Zig 0.17.0, `zig build -Demit-lib-vt -Demit-xcframework=true -Doptimize=ReleaseFast` → `ghostty-vt.xcframework` (macOS arm64+x86_64), Swift module name `GhosttyVt`.
+- API for renderers (`render.h`): frame snapshots (render state), per-row dirty tracking, cursor, colors and selection. Supports a two-step update that splits the IO thread from the render thread.
+- Input API: key encoder (Kitty keyboard protocol included), mouse encoder, paste (bracketed paste handling included).
+- Callbacks: writing PTY replies, bell, title, cwd (OSC 7), desktop notifications (OSC 9/777), progress (OSC 9;4), clipboard (OSC 52), synchronized output (mode 2026), **program state (OSC 7501: idle/working/done/blocked/error)**.
 
-## 6. 기능 명세
+## 6. Features
 
-### 6.1 프로젝트
+### 6.1 Projects
 
-- 로컬 git 저장소 폴더를 선택해서 등록한다. git 저장소가 아니면 거부한다.
-- 프로젝트별 설정: 기본 base 브랜치, 준비 작업(6.3).
-- 프로젝트의 원래 체크아웃(메인 폴더)도 사이드바에 "main" 워크스페이스로 보여 주고 터미널을 열 수 있다. 메인 워크스페이스는 아카이브/삭제할 수 없다. **[제안]**
-- 프로젝트 등록 해제는 앱 기록만 지운다. 저장소와 worktree는 건드리지 않는다. **[제안]**
+- Add one by choosing a local git repository folder. A folder that isn't a git repository is refused.
+- Per-project settings: default base branch, setup (6.3).
+- The project's original checkout (the main folder) also shows in the sidebar as the "main" workspace and can open terminals. The main workspace can't be archived or deleted. **[Proposal]**
+- Removing a project only clears the app's record. The repository and worktrees are left alone. **[Proposal]**
 
-### 6.2 워크스페이스 생성
+### 6.2 Making a workspace
 
-- 입력: 이름, 그리고 다음 중 하나
-  - 새 브랜치: base(기본값은 프로젝트 기본 base, 미설정 시 `origin/HEAD`, 그것도 없으면 현재 브랜치)에서 `--no-track`으로 만든다. 브랜치 이름 기본값은 `<브랜치 접두사><이름>`이고 공백은 `-`로 바꾼다. 한글 이름을 허용한다(사용자의 기존 브랜치가 `<사용자명>/한글-이름` 형태다).
-  - 기존 브랜치: 로컬/원격 브랜치를 골라 체크아웃한다. **[제안]**
-- 생성 전에 `git fetch`를 시도한다. 실패하면 로컬 ref로 진행한다. 인증 프롬프트에 걸려 멈추지 않도록 `GIT_TERMINAL_PROMPT=0`과 시간제한을 둔다. **[제안]**
-- worktree 위치 기본값: `~/plum/workspaces/<프로젝트>/<워크스페이스>`. 설정에서 바꿀 수 있다. **[제안]** 사용자가 쓰던 Orca의 `~/orca/workspaces/<프로젝트>/<이름>` 구조와 맞췄다.
-- 이름 충돌(브랜치가 이미 있음, 폴더가 이미 있음)은 생성 전에 막고 이유를 보여 준다.
+- Input: a name, and one of
+  - New branch: made from the base (default: the project's default base; if unset, `origin/HEAD`; failing that, the current branch) with `--no-track`. The branch name defaults to `<branch prefix><name>` with spaces turned into `-`. Korean names are allowed (the user's existing branches look like `<user name>/<name in Korean>`).
+  - Existing branch: pick a local or remote branch and check it out. **[Proposal]**
+- Try `git fetch` before making it. On failure, go on with local refs. `GIT_TERMINAL_PROMPT=0` and a time limit keep it from hanging on an authentication prompt. **[Proposal]**
+- Default worktree location: `~/plum/workspaces/<project>/<workspace>`. Can be changed in Settings. **[Proposal]** Matches the `~/orca/workspaces/<project>/<name>` layout of the Orca the user had been using.
+- Name collisions (the branch exists, the folder exists) are stopped before making anything, with the reason shown.
 
-### 6.3 준비 작업 **[결정: 앱이 직접 수행 / 세부는 제안]**
+### 6.3 Setup **[Decision: the app does it / details proposed]**
 
-프로젝트마다 설정한다.
+Set per project.
 
-1. **복사할 파일**: 메인 체크아웃 기준 상대 경로 glob 목록 (예: `.env*`). 새 worktree의 같은 상대 경로로 복사한다. 이미 있는 파일은 덮어쓰지 않는다. 저장소 밖을 가리키는 패턴(`..`, 절대 경로)은 거부한다.
-2. **준비 명령**: 예: `pnpm install`.
-3. **에이전트 시작 명령**: 예: `claude`. 비워 둘 수 있다.
+1. **Files to copy**: a list of globs relative to the main checkout (e.g. `.env*`). Copied to the same relative path in the new worktree. Files already there aren't overwritten. Patterns that point outside the repository (`..`, absolute paths) are refused.
+2. **Setup command**: e.g. `pnpm install`.
+3. **Agent start command**: e.g. `claude`. Can be left empty.
 
-실행 방식: 파일 복사는 앱이 직접 한다. 준비 명령과 에이전트 명령은 워크스페이스의 첫 터미널 탭에 `준비 명령 && 에이전트 명령` 형태로 입력해 사용자의 로그인 셸이 실행한다. **[결정, 11/17]** 에이전트는 프로젝트 설정이 아니라 새 워크스페이스·새 탭을 열 때마다 고른다(터미널/Claude/Codex, Orca처럼). 팔레트는 마지막 선택을 기억하고, 탭 끝의 +는 같은 메뉴를 띄우며 ⌘T는 터미널이다. Claude·Codex 명령은 전역 설정에 두고, 예전 프로젝트별 에이전트 명령은 처음 실행할 때 그쪽으로 옮긴다. 진행이 화면에 그대로 보이고, 준비 명령이 실패하면 에이전트는 시작되지 않는다.
+How it runs: the app copies the files itself. The setup command and the agent command are typed into the workspace's first terminal tab as `setup command && agent command`, and the user's login shell runs them. **[Decision, 11/17]** The agent isn't a project setting; it's picked each time a new workspace or a new tab opens (Terminal/Claude/Codex, as in Orca). The palette remembers the last choice, the + at the end of the tabs shows the same menu, and ⌘T is a terminal. The Claude and Codex commands live in the global settings, and the old per-project agent commands move there on the first launch. Progress is visible on screen as it happens, and if the setup command fails the agent doesn't start.
 
-**[결정, 2026-11-19]** 에이전트 실행은 Orca를 그대로 따른다(사용자 요청). Orca 1.x 코드에서 확인한 내용:
-- 권한 선택 셋, 기본값 "전체 허용"(Orca `agentPermissionDefault: 'full-access'`). 붙이는 플래그도 Orca 표와 같다: 전체 허용 Claude `--dangerously-skip-permissions`, Codex `--dangerously-bypass-approvals-and-sandbox`; 자동 승인 `--permission-mode auto`, `--approve-for-me`; 자체 설정은 없음. 명령에 권한 인수가 이미 있으면 붙이지 않는다(Orca가 사용자 인수를 지키는 것과 같다).
-- 신뢰 기록(Orca `agentWorkspaceTrustEnabled: true`): 에이전트가 열리기 전에 폴더를 Claude 설정(`projects[<경로>].hasTrustDialogAccepted`, 준 경로와 실제 경로 둘 다)과 Codex `config.toml`(`[projects."<실제 경로>"] trust_level = "trusted"`)에 적는다. Claude 쪽은 Orca처럼 Claude의 잠금 디렉터리를 잡고 다시 읽은 뒤 임시 파일을 바꿔 넣는다. 파일이 없거나 읽을 수 없거나 잠금을 못 잡으면 쓰지 않는다. **[빌더]** Codex는 처음에 `-c projects={…}`로 실행마다 넘겼으나, 입력되는 명령이 길어지고 Orca도 파일에 쓰므로 파일 기록으로 바꿨다.
-- 이유(Orca가 플래그를 붙이는 까닭): 워크트리마다 에이전트를 여럿 돌려 두고 사람은 결과만 보는 흐름이라, 명령마다 묻는 확인이 에이전트를 "입력 대기"에 세워 둔다. 대가로 에이전트가 그 사용자 권한으로 무엇이든 실행한다. 워크트리는 파일을 나눌 뿐 샌드박스가 아니다(Codex 도움말도 "외부 샌드박스 안에서만"이라고 한다). 그래서 설정에서 자동 승인이나 자체 설정으로 바꿀 수 있고, 무엇을 붙이는지 설정 화면에 그대로 보인다.
+**[Decision, 2026-11-19]** Starting agents follows Orca exactly (the user's request). What was checked in Orca 1.x's code:
+- Three permission choices, "Full Access" by default (Orca `agentPermissionDefault: 'full-access'`). The flags added are the same as Orca's table: Full Access, Claude `--dangerously-skip-permissions`, Codex `--dangerously-bypass-approvals-and-sandbox`; Auto-Approve `--permission-mode auto`, `--approve-for-me`; Agent's Own Settings adds nothing. If the command already has a permission argument, nothing is added (as Orca keeps the user's arguments).
+- Trusted folders (Orca `agentWorkspaceTrustEnabled: true`): before an agent opens, its folder is written into Claude's settings (`projects[<path>].hasTrustDialogAccepted`, for both the given path and the real path) and Codex's `config.toml` (`[projects."<real path>"] trust_level = "trusted"`). On Claude's side, as Orca does, Plum takes Claude's lock directory, reads the file again, and swaps in a temporary file. If the file is missing or unreadable, or the lock can't be taken, nothing is written. **[Builder]** Codex was first given `-c projects={…}` on every run, but that made the typed command long, and Orca writes the file too, so it was switched to writing the file.
+- Why (the reason Orca adds the flags): the flow is several agents running per worktree with a person looking only at the results, so a confirmation for every command leaves the agent stuck at "waiting for input". The price is that the agent runs anything with that user's permissions. A worktree separates files; it isn't a sandbox (Codex's help, too, says "only inside an external sandbox"). So Settings can switch to Auto-Approve or Agent's Own Settings, and the settings screen shows exactly what is added.
 
-설정은 앱 쪽에만 저장한다. **[제안]**
+Settings are stored only on the app's side. **[Proposal]**
 
-### 6.4 아카이브 / 삭제 / 복원 **[결정: 사용자가 직접, worktree 자동 제거 / 세부는 제안]**
+### 6.4 Archive / delete / restore **[Decision: the user does it, the worktree is removed automatically / details proposed]**
 
-- **아카이브**: worktree 폴더를 제거한다(`git worktree remove`). 브랜치와 워크스페이스 기록은 남긴다.
-- **복원**: 남겨 둔 브랜치로 worktree를 다시 만들고, 준비 작업을 다시 실행한다.
-- **삭제**: worktree, 워크스페이스 기록, 로컬 브랜치를 지운다.
-- **데이터 손실 방지 (필수)**:
-  - 아카이브/삭제 전에 `git status --porcelain`(추적 안 하는 파일 포함)을 확인한다. 변경이 있으면 파일 목록을 보여 주고 추가 확인을 받은 뒤에만 강제 제거한다.
-  - 삭제 시 브랜치에 어떤 원격에도 없는 커밋이 있으면 그 목록을 보여 주고 추가 확인을 받는다.
-  - 워크스페이스 터미널은 함께 종료된다는 사실을 확인 창에 적는다.
-  - 제거 대상은 `git worktree list`에 실제로 나오고, 메인 worktree가 아니며, 앱 기록의 경로와 일치하는 것으로 한정한다.
-- 앱 밖에서 worktree 폴더가 사라진 경우: 사이드바에 "폴더 없음"으로 표시한다. 아카이브/삭제 시 `git worktree remove`가 해당 항목만 정리한다(저장소 전체에 작용하는 `git worktree prune`은 쓰지 않는다. Orca가 같은 저장소를 관리 중일 수 있어서다).
+- **Archive**: removes the worktree folder (`git worktree remove`). The branch and the workspace record are kept.
+- **Restore**: makes the worktree again from the kept branch and runs the setup again.
+- **Delete**: removes the worktree, the workspace record and the local branch.
+- **Preventing data loss (required)**:
+  - Before archiving or deleting, check `git status --porcelain` (untracked files included). If there are changes, list the files and force the removal only after an extra confirmation.
+  - On delete, if the branch has commits on no remote, list them and get an extra confirmation.
+  - The confirmation says that the workspace's terminals end with it.
+  - Only remove what actually shows in `git worktree list`, isn't the main worktree, and matches the path in the app's record.
+- When a worktree folder disappeared outside the app: the sidebar shows "Folder missing". On archive or delete, `git worktree remove` cleans up only that entry (`git worktree prune`, which acts on the whole repository, isn't used, since Orca may be managing the same repository).
 
-### 6.5 터미널
+### 6.5 Terminal
 
-- 워크스페이스마다 터미널 탭 여러 개. 새 탭은 그 worktree 경로에서 로그인 셸로 시작한다.
-- 워크스페이스를 전환해도 다른 워크스페이스의 터미널은 계속 돈다. 화면에 안 보이는 터미널은 그리지 않고 VT 상태만 갱신한다.
-- 지원 범위: 256색·트루컬러, 굵게/기울임/흐리게/반전/밑줄/취소선, 대체 화면, bracketed paste, 동기 출력(mode 2026), OSC 7(cwd), OSC 9/777(알림), OSC 7501(상태), OSC 52(클립보드 쓰기), Kitty 키보드 프로토콜(라이브러리 인코더).
-- 스크롤백, 마우스 드래그 선택(더블클릭 단어, 트리플클릭 줄), 복사/붙여넣기. 위험한 붙여넣기(줄바꿈 포함 + bracketed paste 꺼짐)는 확인을 받는다.
-- 한글 IME: `NSTextInputClient` 구현, 조합 중 글자를 커서 위치에 표시.
-- 글꼴: 사용자가 고른 고정폭 글꼴 + CoreText 폴백(한글·이모지).
-- `TERM=xterm-256color`, `COLORTERM=truecolor`, `TERM_PROGRAM=Plum`. **[제안]** 자체 terminfo를 배포하면 SSH 접속 시 상대 서버에서 깨져서다.
-- v1 범위이지만 프로토타입에서 미룬 것은 14장 참고.
+- Several terminal tabs per workspace. A new tab starts a login shell at that worktree's path.
+- Switching workspaces keeps the other workspaces' terminals running. Terminals not on screen aren't drawn; only their VT state is updated.
+- Supported: 256 colors and true color, bold/italic/faint/inverse/underline/strikethrough, the alternate screen, bracketed paste, synchronized output (mode 2026), OSC 7 (cwd), OSC 9/777 (notifications), OSC 7501 (state), OSC 52 (clipboard writes), the Kitty keyboard protocol (the library's encoder).
+- Scrollback, mouse drag selection (double click for a word, triple click for a line), copy/paste. A risky paste (contains a newline + bracketed paste off) asks first.
+- Korean IME: implements `NSTextInputClient`, and shows the characters being composed at the cursor.
+- Fonts: the fixed-width font the user picks + CoreText fallback (Korean, emoji).
+- `TERM=xterm-256color`, `COLORTERM=truecolor`, `TERM_PROGRAM=Plum`. **[Proposal]** Shipping our own terminfo would break on the far server over SSH.
+- For what's in v1 scope but put off in the prototype, see chapter 14.
 
-### 6.6 에이전트 상태 **[결정: 보여 준다 / 감지 방식은 제안]**
+### 6.6 Agent state **[Decision: show it / how it's detected proposed]**
 
-**[결정, 2026-11-19]** 표시는 고리 하나로 통일한다(시안 "상태 표시 10안" 중 1안, 픽셀 고양이 5안은 기각): 없음 흐린 고리, 작업 중 틈이 도는 고리, 입력 대기 숨 쉬는 두꺼운 고리, 완료 체크를 새긴 채운 원. 사용자가 Orca처럼 "모니터링 중"도 보여 달라고 해 다섯째 상태를 더했다. Orca는 Claude의 턴이 끝났어도 그가 띄운 백그라운드 작업이 살아 있으면 작업 중의 "모니터링" 모드로 본다. Plum은 Stop 훅 입력(공식 문서의 `background_tasks`, `session_crons`)을 그대로 받아, 하위 에이전트가 돌면 작업 중, 명령·Monitor·워크플로·예약된 깨우기가 남으면 모니터링 중(흐린 청록 고리 안에 맥박선이 그려졌다 지워짐, 아이콘 10안 중 9안), 없으면 완료로 정한다. 모니터링 중은 할 일이 없어 "확인 필요"와 알림에 넣지 않는다. "확인 필요" 옆 숫자는 입력 대기와 완료를 칩으로 나눠 보인다(배지 5안 중 4안).
+**[Decision, 2026-11-19]** The display is a single ring (option 1 of the mock-up "10 state indicators"; option 5, a pixel cat, was turned down): none is a faint ring, working a ring with a turning gap, waiting for input a thick breathing ring, done a filled disc with a check cut in. The user asked for "monitoring", as in Orca, so a fifth state was added. Orca treats Claude as working in "monitoring" mode when its turn is over but background work it started is still alive. Plum takes the Stop hook's input as is (`background_tasks` and `session_crons` in the official docs): working if a subagent is running, monitoring if a command, Monitor, workflow or scheduled wakeup remains (a faint teal ring with a pulse line drawn and wiped inside, option 9 of 10 icons), otherwise done. Monitoring has nothing to do, so it isn't put under "Needs attention" or in notifications. The count next to "Needs attention" shows waiting and done as separate chips (option 4 of 5 badges).
 
-상태: `idle`(표시 없음), `working`, `waiting`(입력·권한 대기), `done`(턴 종료).
+States: `idle` (nothing shown), `working`, `waiting` (waiting for input or permission), `done` (turn over).
 
-감지 신호:
-1. **OSC 7501 프로그램 상태** — 프로그램이 직접 보내는 표준. 설정 없이 동작한다. `blocked`→waiting, `error`→done으로 표시.
-2. **에이전트 훅 → Unix 소켓** — 앱은 각 PTY 환경 변수에 `PLUM_SOCKET`, `PLUM_TAB_ID`, `PLUM_CLAUDE_SETTINGS`를 넣는다. 훅은 macOS 기본 `nc -U`로 `<탭ID> <상태>` 한 줄을 보낸다(별도 실행 파일 없음).
-   - Claude Code: 앱이 훅 설정 파일을 만들어 두고, `claude --settings "$PLUM_CLAUDE_SETTINGS"`로 실행하면 적용된다. **전역 `~/.claude/settings.json`은 건드리지 않는다.** 매핑: `UserPromptSubmit`·`PostToolUse`→working, `Notification(permission_prompt|elicitation_dialog)`→waiting, `Stop`→done, `SessionEnd`→idle.
-   - Codex: `notify` 설정으로 턴 완료 시 done. (프로토타입에서 미검증)
-3. **OSC 9/777 알림** → waiting. **BEL** → 훅/7501 신호가 없던 탭에서만 waiting.
+Signals:
+1. **OSC 7501 program state**: a standard the program sends itself. Works with no setup. Shown as `blocked`→waiting, `error`→done.
+2. **Agent hooks → Unix socket**: the app puts `PLUM_SOCKET`, `PLUM_TAB_ID` and `PLUM_CLAUDE_SETTINGS` in each PTY's environment. A hook sends one line, `<tab ID> <state>`, with macOS's own `nc -U` (no separate executable).
+   - Claude Code: the app writes a hook settings file, which applies when run as `claude --settings "$PLUM_CLAUDE_SETTINGS"`. **The global `~/.claude/settings.json` is left alone.** Mapping: `UserPromptSubmit` and `PostToolUse`→working, `Notification(permission_prompt|elicitation_dialog)`→waiting, `Stop`→done, `SessionEnd`→idle.
+   - Codex: done at the end of a turn through the `notify` setting. (Not verified in the prototype)
+3. **OSC 9/777 notifications** → waiting. **BEL** → waiting, only in tabs that had no hook/7501 signal.
 
-소켓 입력은 외부 입력이므로 검증한다: 알려진 탭 ID와 상태 값만 받고, 메시지는 길이 제한과 제어 문자 제거를 거친다. 소켓 파일 권한은 0600.
+Socket input is outside input, so it's validated: only known tab IDs and state values are taken, and messages are length-limited and stripped of control characters. The socket file's permissions are 0600.
 
-표시:
-- 탭마다 상태 점. 사이드바의 워크스페이스는 탭들 중 가장 급한 상태(waiting > done > working > idle)를 보여 준다.
-- waiting/done으로 바뀌었는데 그 탭이 화면에 안 보이거나 앱이 비활성이면 macOS 알림. 알림을 누르면 해당 탭으로 이동한다.
-- Dock 아이콘에 waiting/done 탭 수를 배지로 표시하고 Dock 아이콘을 한 번 튕긴다. 권한이 필요 없어 알림이 거부된 환경에서도 동작한다. **[빌더]** 로컬 빌드(ad-hoc 서명)에서 macOS가 알림을 거부하는 것을 확인하고 추가했다.
-- done은 해당 탭을 보면 지운다. 사용자가 그 탭에 키를 입력하면 waiting도 지운다.
+Display:
+- A state dot per tab. A workspace in the sidebar shows the most pressing state of its tabs (waiting > done > working > idle).
+- When a tab turns waiting or done while it isn't on screen or the app isn't active, a macOS notification. Clicking the notification goes to that tab.
+- The Dock icon shows the number of waiting/done tabs as a badge and bounces once. It needs no permission, so it works even where notifications are refused. **[Builder]** Added after seeing macOS refuse notifications for a local build (ad-hoc signature).
+- done clears when the tab is looked at. waiting clears too when the user types in that tab.
 
-### 6.7 화면 구성
+### 6.7 Layout
 
-- 왼쪽 사이드바: 프로젝트 → 워크스페이스(이름, 상태 점) → 아카이브된 항목. 창 바탕 위에 바로 놓이고 구분선이 없다.
-  - 경계를 끌어 너비를 180~420pt로 조절하고 저장한다. 경계를 더블클릭하면 기본 236pt.
-  - 워크스페이스 우클릭 메뉴: 이름 바꾸기, 아카이브(아카이브된 것은 복원), 작업 트리 삭제(빨강), Finder에서 보기, 복사(경로·브랜치). 기본 체크아웃은 삭제 항목을 끈 채 이유를 두 줄로 보이고 "Plum에서 프로젝트 제거"를 준다(Orca 메뉴를 참고). **[결정, 2026-11-19]** 우클릭 메뉴는 시스템 메뉴가 아니라 Plum의 드롭다운(프로그램 선택과 같은 패널)으로 띄운다. 하위 메뉴는 제자리에서 펼치고 키보드(↑↓, Return, →←, Esc)로도 쓴다. Control 클릭도 같은 메뉴를 연다.
-  - **[결정]** 2026-11-19, 사용자가 "orca를 참고해서 … 디테일한 부분들"을 요청: 워크스페이스는 카드로 보인다. 이름 아래 브랜치·커밋 안 한 변경 줄 수·PR(`gh`로 3분마다, 상태 색과 검사 점), 그 아래 탭마다 한 줄(아이콘·제목·상태·에이전트 시간·포트). 탭 줄은 그 탭으로 가고, 포트와 PR은 브라우저로 연다. 카드는 프로젝트 안에서 끌어 순서를 바꾸고(`main`도 옮긴다. 처음엔 맨 위에 고정했으나, 워크스페이스가 하나뿐인 프로젝트에서 끌기가 아무것도 하지 않아 사용자가 "동작 안 해"라고 했다), 프로젝트는 접는다. 메뉴에 읽음으로 표시·탭 모두 닫기·다른 앱에서 열기·PR 열기, 프로젝트 이름 메뉴, 탭 메뉴(제목 변경·다른 탭 닫기·오른쪽 탭 닫기)를 더했다.
-  - **[빌더]** 변경 줄 수는 그 사이 탭에 출력이 있었던 워크스페이스만 30초마다 다시 센다(조용한 워크스페이스는 git을 실행하지 않는다). 포트는 탭 셸 아래 프로세스의 TCP LISTEN 소켓을 4초마다 읽는다. Claude Code가 자기 용도로 여는 포트는 빼려고 에이전트 프로세스 자신의 소켓은 제외한다.
-  - **[빌더]** 탭 끌어 순서 바꾸기는 넣지 않았다. 탭 바가 창 이동 영역(제목 표시줄)에 있어 실제 마우스로 끌면 창이 움직일 수 있고, 합성 이벤트로는 확인할 수 없다. 탭 제목 변경은 처음엔 같은 이유로 우클릭 메뉴로만 했으나, 사용자 요청(2026-11-19)으로 탭 제목 더블클릭도 받는다. 탭 버튼이 클릭을 받아 창 확대로 넘어가지 않는다(합성 이벤트로 창 크기·위치가 그대로인 것만 확인). 순서는 ⌥⌘{ }로 옮긴다.
-  - **[결정]** 이름 바꾸기는 사이드바 이름만 바꾼다. 폴더와 브랜치까지 바꾸면 워크트리 이동과 브랜치 이름 변경이 따라와 위험하다. 이름을 더블클릭해도 제자리에서 고친다(Return 확정, Esc 취소, 다른 곳 클릭 시 확정).
-- 오른쪽: 바탕 위에 떠 있는 둥근 터미널 패널. 패널 맨 위에 탭과 브랜치 이름, 그 아래 터미널.
-- **[결정]** 모양은 시안 "09 Float"의 구성, 색은 "03 Graphite"(짙은 회색 두 톤 + 자두색 강조 하나)를 따른다. 시안 10종 중 사용자가 골랐다. 색 값은 `Sources/PlumKit/UI/Theme.swift`와 `TerminalTheme`에 있다.
-- **[결정]** 2026-11-17 UI 시안에서 고른 세부(구성·색은 위와 같음):
-  - 사이드바: 맨 위 "확인 필요"에 입력 대기·완료 워크스페이스를 프로젝트와 상관없이 모은다.
-  - 상태 표시: 색만이 아니라 모양으로도 구분한다(작업 중 = 도는 호, 입력 대기 = 맥박 치는 점, 완료 = 체크). 흑백에서도 구분된다.
-  - 탭 바: 어두운 띠 위에서 활성 탭이 아래 터미널과 같은 면이 되어 오목한 곡선으로 이어지는 Chrome식. 브랜치는 오른쪽 칩. (처음엔 밑줄 B를 적용했으나, 써 본 뒤 2차 시안 5안 중 F를 골랐다.)
-  - 새 워크스페이스: 팔레트. 이름을 치고 ↵. 충돌은 팔레트가 열린 채로 알려 주고, 통과하면 닫힌 뒤 패널에 진행 단계를 보여 준다.
-  - 시트(설정·프로젝트 설정)와 아카이브·삭제 확인: 시스템 Form·경고창 대신 같은 다크 스타일. 확인 창은 잃을 변경과 커밋을 목록으로 나눠 보여 주고, Return은 여전히 "취소"다.
-  - **[빌더]** 대화상자는 시스템 시트가 아니라 창 안 오버레이로 그린다. 시스템 시트는 열고 닫을 때마다 메인 스레드를 약 0.3초 붙잡아 터미널이 멈췄다(README.ko.md "2026-11-17 UI 개편" 측정). 전환은 Core Animation이 맡는다. 종료·여러 줄 붙여넣기·프로젝트 제거 확인도 같은 오버레이로 옮겨, 앱에 시스템 경고창이 남지 않는다.
-  - **[결정]** 2026-11-17: 워크스페이스·탭 이동 명령은 cmux의 키를 따르고 Orca의 키도 받는다(전체 표는 README.ko.md "단축키"). ⌘1~9는 워크스페이스, ⌃1~9는 탭이다. 사용자가 "orca, cmux 참고해서 … 모두 구현"을 요청했다.
-  - **[빌더]** 프로그램이 실행 중인 탭을 닫을 때와 앱을 끝낼 때는 그 프로그램 이름을 보여 주고 묻는다(4장의 "경고 없이 사라진다" 방지).
-  - 빈 화면: 앱 아이콘과 주요 단축키. 오류: 작업을 막지 않는 토스트(패널 오른쪽 아래).
-- 단축키: 새 탭 Cmd+T, 탭 닫기 Cmd+W, 탭 전환 Ctrl+1..9 및 Cmd+Shift+[ ](2026-11-17에 Cmd+1..9는 워크스페이스로 바뀜), 새 워크스페이스 Cmd+N, 복사/붙여넣기 Cmd+C/V, 글꼴 크기 Cmd+±/0.
+- Left sidebar: projects → workspaces (name, state dot) → archived items. It sits directly on the window background, with no divider.
+  - Drag its edge to set the width between 180 and 420 pt; it's saved. Double-click the edge for the default 236 pt.
+  - Workspace right-click menu: Rename, Archive (Restore for archived ones), Delete Worktree (red), Show in Finder, Copy (path, branch). For the main checkout, the delete item is disabled with the reason in two lines, and "Remove Project from Plum" is offered (modeled on Orca's menu). **[Decision, 2026-11-19]** Right-click menus aren't system menus; they open as Plum's dropdown (the same panel as the program picker). Submenus open in place and work from the keyboard too (↑↓, Return, →←, Esc). A Control-click opens the same menu.
+  - **[Decision]** 2026-11-19, the user asked for "the detailed parts … modeled on Orca": workspaces show as cards. Under the name, the branch, the uncommitted changed lines and the PR (from `gh` every 3 minutes, with a state color and a checks dot), and under that a line per tab (icon, title, state, agent time, ports). A tab line goes to that tab; ports and the PR open in the browser. Cards are dragged to reorder within a project (`main` moves too; it was first pinned to the top, but in a project with only one workspace dragging then did nothing, and the user said "it doesn't work"), and projects fold. The menus gained Mark as Read, Close All Tabs, Open In and Open PR, plus a menu on the project name and a tab menu (rename, Close Other Tabs, Close Tabs to the Right).
+  - **[Builder]** Changed-line counts are recounted every 30 seconds, only for workspaces whose tabs had output in between (quiet workspaces don't run git). Ports come from reading, every 4 seconds, the TCP LISTEN sockets of the processes under a tab's shell. To leave out the ports Claude Code opens for its own use, the agent process's own sockets are excluded.
+  - **[Builder]** Dragging tabs to reorder them was left out. The tab bar is in the window's drag area (the title bar), so dragging with a real mouse may move the window, and synthesized events can't check it. Renaming a tab was at first only in the right-click menu for the same reason, but at the user's request (2026-11-19) a double click on the tab title works too. The tab button takes the click, so it doesn't pass through to zooming the window (checked only with synthesized events, that the window's size and place stay the same). Order is changed with ⌥⌘{ }.
+  - **[Decision]** Rename changes only the name in the sidebar. Changing the folder and branch too would bring a worktree move and a branch rename with it, which is risky. Double-clicking the name edits it in place too (Return confirms, Esc cancels, a click elsewhere confirms).
+- Right: a rounded terminal panel floating above the background. At the top of the panel, the tabs and the branch name; under them, the terminal.
+- **[Decision]** The shape follows the layout of mock-up "09 Float", the colors "03 Graphite" (two tones of dark gray + one plum accent). The user picked them from 10 mock-ups. The color values are in `Sources/PlumKit/UI/Theme.swift` and `TerminalTheme`.
+- **[Decision]** Details picked from the 2026-11-17 UI mock-ups (layout and colors as above):
+  - Sidebar: "Needs attention" at the top gathers workspaces waiting for input or done, whatever their project.
+  - State indicators: told apart by shape, not only color (working = a turning arc, waiting for input = a pulsing dot, done = a check). They can be told apart in black and white.
+  - Tab bar: Chrome style, where the active tab on a dark strip becomes the same surface as the terminal below and joins it with a concave curve. The branch is a chip on the right. (Underline B was applied first, but after using it, F was picked from five second-round mock-ups.)
+  - New workspace: a palette. Type the name and ↵. Collisions are reported with the palette still open; once it passes, the palette closes and the panel shows the steps.
+  - Sheets (Settings, Project Settings) and the archive and delete confirmations: the same dark style instead of system Forms and alerts. The confirmation lists the changes and commits that would be lost separately, and Return is still "Cancel".
+  - **[Builder]** Dialogs are drawn as overlays in the window, not as system sheets. A system sheet held the main thread about 0.3 s on every open and close, and the terminal froze (measured in [Verification](../../verification.md), "2026-11-17 UI overhaul"). Core Animation does the transitions. The quit, multi-line paste and project removal confirmations moved to the same overlay too, so no system alerts are left in the app.
+  - **[Decision]** 2026-11-17: the commands for moving between workspaces and tabs follow cmux's keys and also take Orca's (the full table is under "Keyboard" in README.md). ⌘1–9 are workspaces, ⌃1–9 tabs. The user asked to "implement them all … modeled on Orca and cmux".
+  - **[Builder]** Closing a tab with a program running and quitting the app show that program's name and ask (preventing "disappear without a warning" from chapter 4).
+  - Empty screen: the app icon and the main shortcuts. Errors: a toast that doesn't block work (bottom right of the panel).
+- Shortcuts: new tab Cmd+T, close tab Cmd+W, switch tabs Ctrl+1..9 and Cmd+Shift+[ ] (on 2026-11-17 Cmd+1..9 became workspaces), new workspace Cmd+N, copy/paste Cmd+C/V, font size Cmd+±/0.
 
-## 7. 아키텍처
+## 7. Architecture
 
-- **언어/UI**: Swift(SwiftPM 패키지). 창과 분할은 AppKit, 사이드바·탭 바·대화상자는 SwiftUI(`NSHostingView`). 터미널 뷰는 `NSView` + `CAMetalLayer`이고 SwiftUI 뷰 트리에 넣지 않는다(SwiftUI가 살아 있는 터미널을 재생성하는 문제를 피한다).
-- **터미널 뷰는 창에 하나**: 탭을 바꾸면 뷰는 그대로 두고 표시할 세션만 바꾼다. Metal 레이어 하나가 창 크기 버퍼 2장(이 창 크기에서 약 22MB)을 잡기 때문에, 탭마다 뷰를 두면 탭 수만큼 곱해진다. 프로토타입 측정에서 드러나 바꿨다.
-- **VT 계층**: libghostty-vt 1.0.1 정적 라이브러리(xcframework, SwiftPM binaryTarget). `scripts/build-vt.sh`가 Zig 0.17.0(체크섬 검증)과 `vt-1.0.1` 소스를 받아 직접 빌드한다. 서드파티가 미리 빌드한 바이너리는 쓰지 않는다.
-- **스레드**: 터미널마다 IO 스레드가 PTY를 읽어 VT에 쓴다. 메인 스레드가 그린다. 터미널 상태는 락으로, render state는 별도 락으로 보호한다(락 순서: 터미널 → render state). 렌더 프레임은 2단계 업데이트로 터미널 락 보유 시간을 최소화한다.
-- **렌더러**: 자체 Metal. 인스턴스 쿼드 1개 파이프라인(배경 사각형/글리프 마스크/컬러 글리프), 글리프 아틀라스, 줄 단위 캐시(dirty 줄만 다시 계산), 디스플레이 링크로 수직 동기에 맞춰 그리고 변화가 없으면 링크를 멈춘다. 동기 출력 구간은 구간 시작 시점의 프레임을 유지하고 1초 시간제한을 둔다.
-- **글꼴**: CoreText로 글리프 조회·래스터화, 폴백 체인.
-- **PTY**: 작은 C 타깃에서 `forkpty` + `execve`.
-- **git**: 시스템 `/usr/bin/git` CLI 호출. libgit2는 쓰지 않는다.
-- **저장소**: `~/Library/Application Support/dev.plum.Plum/state.json`. 원자적 쓰기. (`Plum`이라는 폴더에는 이 Mac에 이미 다른 프로그램의 파일이 있어 번들 ID 이름을 쓴다.)
-- **IPC**: 상태 훅용 Unix 도메인 소켓 1개.
-- 외부 의존성은 libghostty-vt 하나뿐이다.
+- **Language/UI**: Swift (a SwiftPM package). AppKit for the window and splits, SwiftUI (`NSHostingView`) for the sidebar, tab bar and dialogs. The terminal view is an `NSView` + `CAMetalLayer` and isn't put in the SwiftUI view tree (avoiding SwiftUI recreating a live terminal).
+- **One terminal view per window**: switching tabs keeps the view and changes only the session it shows. A Metal layer holds two window-sized buffers (about 22 MB at this window size), so a view per tab would multiply that by the number of tabs. The prototype's measurements showed it, and it was changed.
+- **VT layer**: libghostty-vt 1.0.1 static library (xcframework, SwiftPM binaryTarget). `scripts/build-vt.sh` downloads Zig 0.17.0 (checksum verified) and the `vt-1.0.1` source and builds it here. No binaries prebuilt by a third party.
+- **Threads**: per terminal, an IO thread reads the PTY and writes to the VT. The main thread draws. The terminal state is guarded by a lock and the render state by a separate lock (lock order: terminal → render state). Render frames use the two-step update to keep the terminal lock held as briefly as possible.
+- **Renderer**: our own Metal. A single instanced-quad pipeline (background rectangles/glyph masks/color glyphs), a glyph atlas, a per-row cache (only dirty rows are recomputed), drawing in step with vertical sync through a display link, and the link stopped when nothing changes. Synchronized output keeps the frame from when the span started, with a 1 s time limit.
+- **Fonts**: CoreText for glyph lookup and rasterization, a fallback chain.
+- **PTY**: `forkpty` + `execve` in a small C target.
+- **git**: calls the system `/usr/bin/git` CLI. No libgit2.
+- **Storage**: `~/Library/Application Support/dev.plum.Plum/state.json`. Atomic writes. (A folder named `Plum` already holds another program's files on this Mac, so the bundle ID is used as the name.)
+- **IPC**: one Unix domain socket for the state hooks.
+- libghostty-vt is the only outside dependency.
 
-## 8. 제약
+## 8. Constraints
 
-- macOS 14 이상(디스플레이 링크 API 기준). **[빌더]**
-- 프로토타입은 사용자 Mac(Apple Silicon)용으로 빌드한다. 라이브러리는 universal로 빌드되어 있어 배포 시 universal 앱으로 바꿀 수 있다. (15장-6)
-- 라이선스: libghostty-vt MIT 고지 포함. cmux(GPL) 등 다른 앱 코드는 복사하지 않는다.
+- macOS 14 or later (for the display link API). **[Builder]**
+- The prototype is built for the user's Mac (Apple Silicon). The library is built universal, so a release can become a universal app. (15-6)
+- License: includes libghostty-vt's MIT notice. No code is copied from other apps such as cmux (GPL).
 
-## 9. 성능 목표와 측정 **[제안]**
+## 9. Performance goals and measurement **[Proposal]**
 
-같은 머신에서 Ghostty 1.3.1과 같은 조건으로 비교한다. Ghostty 이상이 기준선이고, 더 빠른 것은 지향점이다.
+Compared with Ghostty 1.3.1 on the same machine under the same conditions. At least as good as Ghostty is the baseline; faster is the aim.
 
-| 항목 | 측정 방법 | 기준선 |
+| Measure | How | Baseline |
 |---|---|---|
-| 앱 크기 | 번들 `du -sh` | Ghostty(62MB) 이하 |
-| 콜드 스타트 → 첫 프레임 | 프로세스 시작부터 첫 터미널 프레임까지 | Ghostty 이하 |
-| 메모리 | 터미널 1개/10개 idle | Ghostty 이하 |
-| 처리량 | 대용량 파일 `cat` 소요 시간 | Ghostty의 90% 이상 |
-| 입력 지연 | 키 입력→화면 (측정 도구 필요) | Ghostty 이하 |
+| App size | `du -sh` of the bundle | Ghostty (62 MB) or less |
+| Cold start → first frame | from process start to the first terminal frame | Ghostty or less |
+| Memory | 1/10 terminals idle | Ghostty or less |
+| Throughput | time to `cat` a large file | 90% of Ghostty or more |
+| Input latency | key press → screen (needs a measuring tool) | Ghostty or less |
 
-"더 빠르다"는 측정 결과로만 주장한다. 프로토타입 측정 결과와 방법, 한계는 `docs/benchmarks/2026-11-16.md`에 있다. 요약: 창 표시·출력 처리·키 입력 지연·메모리는 Plum이 낫고, 셸 시작 시점은 Ghostty가 약 14ms 빠르다.
+"Faster" is claimed only from measurements. The prototype's results, method and limits are in `docs/benchmarks/2026-11-16.md`. In short: Plum is better at showing the window, output throughput, key latency and memory; Ghostty starts the shell about 14 ms sooner.
 
-## 10. 검증
+## 10. Verification
 
-- 자동 테스트: git worktree 수명 주기(임시 저장소), 상태 프로토콜 파싱, 브랜치 이름 변환, 파일 복사 glob.
-- 렌더링: 알려진 입력을 넣고 창 스크린샷으로 확인(색, 한글·이모지 폭, 커서, 선택).
-- 실사용 시나리오: Claude Code, vim, htop 등에서 화면 깨짐 없음.
-- 상태 감지: 소켓 메시지 → 사이드바 표시, 실제 Claude Code 훅 1회 확인.
-- 한글 IME: 실제 키 입력이 필요해 사용자 확인 대상이다.
+- Automated tests: the git worktree life cycle (temporary repositories), state protocol parsing, branch name conversion, file copy globs.
+- Rendering: feed known input and check with window screenshots (colors, Korean and emoji widths, cursor, selection).
+- Real use: no broken screens in Claude Code, vim, htop and the like.
+- State detection: socket message → sidebar display, a real Claude Code hook checked once.
+- Korean IME: needs real key presses, so it's for the user to check.
 
-## 11. 배포 **[제안]**
+## 11. Distribution **[Proposal]**
 
-v1은 사용자 본인용(로컬 빌드, ad-hoc 서명). 다른 사람에게 배포할 때 Developer ID 서명·공증과 Sparkle 자동 업데이트를 추가한다.
+v1 is for the user alone (a local build, ad-hoc signature). To give it to others, add Developer ID signing, notarization and Sparkle auto-updates.
 
-## 12. 구현자가 정한 것 **[빌더]**
+## 12. What the implementer decided **[Builder]**
 
-- SwiftPM 패키지 + `scripts/bundle.sh`로 `.app` 생성(Xcode 프로젝트 파일 없음).
-- Metal 셰이더는 실행 시 소스에서 컴파일(빌드 단계 단순화).
-- 상태 훅 전송은 `nc -U` 한 줄(별도 CLI 없음).
-- 브랜치 접두사 설정 추가(사용자의 기존 브랜치 규칙 `<사용자명>/…`에 맞춤).
+- A SwiftPM package + `scripts/bundle.sh` makes the `.app` (no Xcode project file).
+- Metal shaders are compiled from source at launch (a simpler build).
+- State hooks send with a one-line `nc -U` (no separate CLI).
+- Added a branch prefix setting (matching the user's existing branch convention, `<user name>/…`).
 
-## 13. 프로토타입 범위
+## 13. Prototype scope
 
-들어가는 것: 6.1~6.4 전부, 6.5의 터미널 핵심(렌더링, 입력, IME, 스크롤백, 선택, 복사/붙여넣기, 탭), 6.6의 상태 감지와 표시, 설정 최소(글꼴·크기·워크스페이스 위치·브랜치 접두사), 상태 저장.
+In: all of 6.1–6.4, the terminal core of 6.5 (rendering, input, IME, scrollback, selection, copy/paste, tabs), state detection and display from 6.6, minimal settings (font, size, workspace location, branch prefix), saving state.
 
-## 14. 프로토타입에서 미룬 것 (v1 전에 필요)
+## 14. Put off in the prototype (needed before v1)
 
-**[2026-11-20 처리]** 터미널 내 검색, 마우스 보고와 대체 화면 휠, OSC 8 링크, 재시작 시 탭 구성 복원(터미널 호스트), 화면 분할, 워크스페이스 별도 창, 강조 색 선택은 구현했다.
-- 화면 분할 **[결정]**: 창 하나하나가 워크스페이스의 보통 탭이고, 나눈 모양(`SplitNode` 트리)만 탭 바의 "머리" 탭 아래에 묶는다. 그래서 사이드바, 에이전트 상태, 포트, 훅, 터미널 호스트는 바꾸지 않았다. 화면에는 보이는 창마다 TerminalView를 하나씩 두고, 안 보이는 탭의 뷰는 버린다(뷰마다 창 크기의 그리기 버퍼를 갖는다).
-- 별도 창 **[결정]**: 터미널 하나는 한 곳에만 그린다(세션의 그리기 연결이 하나다). 그래서 워크스페이스 단위로 창을 나누고, 메인 창은 그 워크스페이스 대신 "그 창으로 가기"를 보인다. 앞에 있는 창의 워크스페이스가 선택이 되어 메뉴가 그 창에 듣는다. 대화상자는 메인 창에 뜨고, 뜰 때 메인 창을 앞으로 가져온다.
-- 밝은 테마 **[결정, 사용자]**: 만들었다가 사용자 요청으로 뺐다. 앱은 늘 어둡고, 강조 색만 고른다.
+**[Done 2026-11-20]** Find in the terminal, mouse reporting and the wheel on the alternate screen, OSC 8 links, restoring the tab layout on relaunch (the terminal host), split panes, separate windows for workspaces and picking an accent color are implemented.
+- Split panes **[Decision]**: each pane is an ordinary tab of the workspace, and only the shape of the split (a `SplitNode` tree) groups them under the "head" tab in the tab bar. So the sidebar, agent state, ports, hooks and the terminal host didn't change. On screen there is one TerminalView per visible pane, and the views of tabs not on screen are dropped (each view has a window-sized drawing buffer).
+- Separate windows **[Decision]**: a terminal is drawn in one place only (a session has one drawing connection). So windows are split by workspace, and the main window shows "Go to That Window" in place of that workspace. The workspace of the window in front becomes the selection, so the menus act on that window. Dialogs show in the main window and bring it to the front when they do.
+- Light theme **[Decision, user]**: built, then taken out at the user's request. The app is always dark; only the accent color is picked.
 
-- 박스 문자 직접 그리기(글꼴 글리프로 틈이 보일 경우)
-- Codex 훅 검증, 전역 훅 설치 버튼(선택 사항)
-- vttest/esctest 전체 통과 확인, 입력 지연 측정
-- universal 빌드, 서명·공증, 자동 업데이트 (macOS 알림은 Developer ID 서명 후 다시 확인 필요)
-- 터미널 내용의 VoiceOver 탐색(현재는 화면 전체를 한 덩어리 텍스트로만 읽음)
-- 다른 화면(60Hz 외장), 실제 장시간 에이전트 작업에서의 성능 측정
+- Drawing box characters directly (in case font glyphs show gaps)
+- Verifying the Codex hooks, a button to install global hooks (optional)
+- Checking a full vttest/esctest pass, measuring input latency
+- Universal build, signing and notarization, automatic updates (macOS notifications need checking again after Developer ID signing)
+- VoiceOver navigation of terminal content (today the whole screen is read only as one block of text)
+- Measuring performance on other displays (60 Hz external) and in real long agent sessions
 
-## 15. 작성자가 결정한 열린 질문
+## 15. Open questions the author decided
 
-검토자(빌더 체크)가 낸 질문과 그에 대한 결정이다.
+The questions the reviewer (builder check) raised, and the decisions on them.
 
-1. **[결정, 2026-11-19] 세션을 유지한다.** 사용자가 "orca는 껐다 켜져도 다 복구될 거야, 똑같이 작동하게 해 봐"라고 요청했다. Orca는 별도 터미널 데몬(`Orca Terminal Host`)이 셸을 갖고 앱보다 오래 산다. Plum도 같은 실행 파일을 `--terminal-host`로 띄운 호스트가 pty를 갖는다(`Sources/PlumKit/Terminal/TerminalHost.swift`). **[빌더]** 앱이 붙어 있는 동안 호스트는 출력을 넘기기만 하고, 앱이 끌 때 각 터미널 화면을 libghostty-vt 포매터의 VT 시퀀스로 넘기면 그때부터 호스트가 해석한다. 다시 붙으면 그 화면(스크롤백·모드·창 제목 포함)을 돌려준다. 앱이 붙어 있는 동안 두 번 해석하지 않으려는 것이다(터미널 하나에 약 1MB, 스크롤백은 최대 10MB). 대량 출력은 직접 pty의 0.83배로 느려진다(README.ko.md 측정). pty를 앱에 넘기는(SCM_RIGHTS) 방식은 빠르지만 앱이 꺼지는 순간의 출력을 잃을 수 있어 택하지 않았다. 아래는 그 전의 판단이다.
-   - (이전) **세션 유지 없음.** 앱을 끄면 터미널과 에이전트도 종료된다. 한 프로세스가 PTY·VT·렌더러를 모두 갖는 구조가 시작 시간과 메모리 목표에 유리하다. 에이전트 대화는 `claude --resume`으로 이어 갈 수 있다. PTY 경계는 파일 디스크립터 하나라서, 나중에 PTY만 붙잡아 두는 작은 프로세스를 추가하는 길은 열려 있다(작성자 판단, 미검증).
-2. **렌더러는 자체 구현 고정.** 사용자가 "Ghostty에 의존하지 않고", "렌더러를 직접 붙이는 쪽"을 골랐다.
-3. **기존 worktree는 가져오지 않는다.** 사용자의 저장소 하나에만 worktree가 21개 있고 대부분 Orca 소유다. 두 앱이 같은 worktree를 관리하면 한쪽에서 지울 때 다른 쪽 기록이 깨진다. 진행 중인 작업은 Orca에서 마치고, 새 작업부터 Plum에서 만든다. 워크스페이스가 경로를 직접 저장하므로 가져오기는 나중에 추가하기 쉽다.
-4. **성능은 Ghostty 이상이 기준선, 더 빠른 것은 지향점.**
-5. **전역 훅 설치는 하지 않는다.** `--settings` 주입으로 전역 설정 파일을 건드리지 않는다.
-6. **프로토타입은 Apple Silicon 빌드.** 사용자 Mac이 arm64다.
-7. **worktree 위치는 `~/plum/workspaces/…`.** 숨김 폴더보다 Finder·에디터에서 열기 쉽고 Orca와 같은 구조다.
+1. **[Decision, 2026-11-19] Sessions are kept.** The user asked: "Orca restores everything even after you quit and restart it, make it work the same way." In Orca a separate terminal daemon (`Orca Terminal Host`) owns the shells and outlives the app. In Plum too, a host started from the same executable with `--terminal-host` owns the ptys (`Sources/PlumKit/Terminal/TerminalHost.swift`). **[Builder]** While the app is attached, the host only passes output through; when the app quits it hands over each terminal's screen as VT sequences from libghostty-vt's formatter, and from then on the host parses. On reattach it gives that screen back (scrollback, modes and window title included). This avoids parsing twice while the app is attached (about 1 MB per terminal, scrollback up to 10 MB). Heavy output slows to 0.83x of a direct pty (measured in [Verification](../../verification.md)). Handing the pty to the app (SCM_RIGHTS) is faster but could lose output at the moment the app quits, so it wasn't chosen. Below is the earlier judgment.
+   - (Earlier) **No session keeping.** Quitting the app ends its terminals and agents too. One process owning the PTY, the VT and the renderer suits the launch time and memory goals. Agent conversations can be continued with `claude --resume`. The PTY boundary is a single file descriptor, so adding a small process that only holds the PTYs later stays possible (the author's judgment, unverified).
+2. **The renderer stays our own.** The user chose "not depending on Ghostty" and "the side that wires up the renderer directly".
+3. **Existing worktrees aren't imported.** One of the user's repositories alone has 21 worktrees, most of them Orca's. If two apps manage the same worktree, deleting it in one breaks the other's record. Work in progress is finished in Orca, and new work starts in Plum. Workspaces store their path directly, so importing is easy to add later.
+4. **At least as good as Ghostty is the baseline; faster is the aim.**
+5. **No global hook install.** Injecting with `--settings` leaves global config files alone.
+6. **The prototype is an Apple Silicon build.** The user's Mac is arm64.
+7. **The worktree location is `~/plum/workspaces/…`.** Easier to open from Finder and editors than a hidden folder, and the same layout as Orca's.
