@@ -130,17 +130,14 @@ public final class AppModel {
     }
 
     /// Older versions kept one agent command per project, run in the first
-    /// tab of every new workspace. It becomes the matching command in the
-    /// settings, and the agent new workspaces start with.
+    /// tab of every new workspace. It becomes the matching command in the settings.
     private func carryOverAgentCommand() {
         let old = state.projects.map { $0.agentCommand.trimmingCharacters(in: .whitespacesAndNewlines) }
         guard let command = old.first(where: { !$0.isEmpty }) else { return }
         if command.contains("codex") {
             state.settings.codexCommand = command
-            state.settings.newWorkspaceProgram = .codex
         } else {
             state.settings.claudeCommand = command
-            state.settings.newWorkspaceProgram = .claude
         }
         for index in state.projects.indices { state.projects[index].agentCommand = "" }
         save()
@@ -1220,10 +1217,6 @@ public final class AppModel {
         projectID: UUID, name: String, branch: String, choice: WorkspaceService.BranchChoice, program: TabProgram
     ) async throws {
         guard let project = project(projectID) else { return }
-        if state.settings.newWorkspaceProgram != program {
-            state.settings.newWorkspaceProgram = program
-            save()
-        }
         let root = state.settings.workspaceRoot
         let existing = state.workspaces
         let setup = firstCommand(for: project, program: program)
@@ -1323,7 +1316,6 @@ public final class AppModel {
         report(created)
         refreshChanges(id)
         selection = id
-        prepare(state.settings.newWorkspaceProgram, in: created.workspace.path)
-        openTab(in: id, command: firstCommand(for: project, program: state.settings.newWorkspaceProgram))
+        openTab(in: id, command: firstCommand(for: project, program: .terminal))
     }
 }

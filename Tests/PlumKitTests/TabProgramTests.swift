@@ -34,7 +34,6 @@ final class TabProgramTests: XCTestCase {
         XCTAssertEqual(model.state.settings.branchPrefix, "me/")
         XCTAssertEqual(model.state.settings.claudeCommand, custom)
         XCTAssertEqual(model.state.settings.codexCommand, AppSettings.defaultCodexCommand)
-        XCTAssertEqual(model.state.settings.newWorkspaceProgram, .claude, "new workspaces keep starting the agent")
         XCTAssertEqual(model.state.projects[0].agentCommand, "")
 
         let reloaded = AppModel(store: Store(directory: directory))
@@ -46,13 +45,11 @@ final class TabProgramTests: XCTestCase {
         let model = AppModel(store: Store(directory: directory))
         XCTAssertEqual(model.state.settings.codexCommand, "codex --full-auto")
         XCTAssertEqual(model.state.settings.claudeCommand, AppSettings.defaultClaudeCommand)
-        XCTAssertEqual(model.state.settings.newWorkspaceProgram, .codex)
     }
 
     func testTheFirstTabRunsSetupThenTheChosenProgram() throws {
         try writeOldState(agentCommand: "")
         let model = AppModel(store: Store(directory: directory))
-        XCTAssertEqual(model.state.settings.newWorkspaceProgram, .terminal, "nothing to carry over")
         var project = model.state.projects[0]
         XCTAssertEqual(model.firstCommand(for: project, program: .terminal), "pnpm install")
         XCTAssertEqual(model.firstCommand(for: project, program: .claude), "pnpm install && " + AppSettings.defaultClaudeCommand + " --dangerously-skip-permissions")

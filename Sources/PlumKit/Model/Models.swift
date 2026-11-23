@@ -93,8 +93,6 @@ public struct AppSettings: Codable, Equatable {
     /// which Claude reports working, waiting and done.
     public var claudeCommand = AppSettings.defaultClaudeCommand
     public var codexCommand = AppSettings.defaultCodexCommand
-    /// What a new workspace's first tab starts: the last choice made.
-    public var newWorkspaceProgram = TabProgram.terminal
     public var agentPermission = AgentPermission.fullAccess
     /// Tell Claude and Codex a workspace is trusted before they first open
     /// in it, so they don't stop to ask.
@@ -139,7 +137,6 @@ public struct AppSettings: Codable, Equatable {
         branchPrefix = try container.decodeIfPresent(String.self, forKey: .branchPrefix) ?? defaults.branchPrefix
         claudeCommand = try container.decodeIfPresent(String.self, forKey: .claudeCommand) ?? defaults.claudeCommand
         codexCommand = try container.decodeIfPresent(String.self, forKey: .codexCommand) ?? defaults.codexCommand
-        newWorkspaceProgram = (try? container.decodeIfPresent(TabProgram.self, forKey: .newWorkspaceProgram)) ?? defaults.newWorkspaceProgram
         agentPermission = (try? container.decodeIfPresent(AgentPermission.self, forKey: .agentPermission)) ?? defaults.agentPermission
         trustWorkspaces = try container.decodeIfPresent(Bool.self, forKey: .trustWorkspaces) ?? defaults.trustWorkspaces
         optionAsMeta = try container.decodeIfPresent(Bool.self, forKey: .optionAsMeta) ?? defaults.optionAsMeta

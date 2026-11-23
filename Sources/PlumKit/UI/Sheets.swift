@@ -303,15 +303,14 @@ struct NewWorkspaceSheet: View {
     @State private var defaultBase = ""
     @State private var error: String?
     @State private var checking = false
-    /// What the first tab starts; the last choice made here.
-    @State private var program: TabProgram
+    /// What the first tab starts: a plain terminal unless another is picked.
+    @State private var program = TabProgram.terminal
     @FocusState private var focus: Field?
 
     init(model: AppModel, project: Project, close: @escaping () -> Void) {
         self.model = model
         self.project = project
         self.close = close
-        _program = State(initialValue: model.state.settings.newWorkspaceProgram)
     }
 
     private var suggestedBranch: String {

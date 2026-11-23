@@ -87,7 +87,7 @@ To ship a build macOS opens directly, `release.sh` signs with the hardened runti
 2. **Project settings** (the ⋯ next to a project name): what happens when a workspace is made.
    - Files to copy: files outside git (one glob per line, e.g. `.env*`) copied from the main checkout into each new worktree.
    - Setup command, e.g. `pnpm install`.
-3. **Add a workspace** (⌘N or the + next to a project): type a name in the palette, choose what the first tab starts (Terminal, Claude or Codex; the last choice is kept) and press Return. Plum makes a worktree and a branch at `<workspace location>/<project>/<name>`, copies the files, and runs `setup command && agent` in the first terminal tab.
+3. **Add a workspace** (⌘N or the + next to a project): type a name in the palette, choose what the first tab starts (Terminal by default, or Claude or Codex) and press Return. Plum makes a worktree and a branch at `<workspace location>/<project>/<name>`, copies the files, and runs `setup command && agent` in the first terminal tab.
    - A name, folder or branch that's taken is reported while the palette is still open.
    - While it's being made, a row shows in the sidebar and the panel lists the steps (fetch, worktree, copy files). You can keep working in other workspaces meanwhile.
 4. **What the sidebar shows**: one card per workspace.
