@@ -29,8 +29,9 @@ struct TabBarView: View {
     @State private var barWidth: CGFloat = 0
     @State private var chipWidth: CGFloat = 0
 
-    // Room for the window buttons when no sidebar is beside the bar.
-    private var leadingInset: CGFloat { scope != .selection || model.sidebarCollapsed ? 82 : 14 }
+    // Room for the window buttons when no sidebar is beside the bar, and in
+    // the main window for the sidebar button after them.
+    private var leadingInset: CGFloat { scope != .selection ? 82 : model.sidebarCollapsed ? 128 : 14 }
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 0) {
@@ -1258,13 +1259,20 @@ public final class MainWindowController: NSWindowController {
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.titlebarSeparatorStyle = .none
-        window.toolbar = NSToolbar(identifier: "PlumMain")
-        window.toolbarStyle = .unified
         // The window moves by that title bar strip only, not by its whole
         // background: there a drag or double-click on a sidebar row or the
         // sidebar's edge would move the window instead of reaching them.
 
         super.init(window: window)
+        // Its one item: the sidebar button, beside the window buttons, where
+        // it stays while the sidebar is folded away. The delegate is set
+        // before the window gets the toolbar, which asks it for items then.
+        let toolbar = NSToolbar(identifier: "PlumMain")
+        toolbar.delegate = self
+        toolbar.allowsUserCustomization = false
+        toolbar.displayMode = .iconOnly
+        window.toolbar = toolbar
+        window.toolbarStyle = .unified
         window.contentViewController = root
         window.setContentSize(NSSize(width: 1180, height: 760))
         window.center()
@@ -1274,12 +1282,33 @@ public final class MainWindowController: NSWindowController {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    public func toggleSidebar() { root.toggleSidebar() }
+    @objc public func toggleSidebar() { root.toggleSidebar() }
     public func focusSidebar() { root.focusSidebar() }
     func traceDialogClose(_ done: @escaping (String) -> Void) { root.traceDialogClose(done) }
     public func focusTerminal() { root.terminalArea.focusTerminal() }
     var terminalView: TerminalView? { root.terminalArea.terminal }
     var terminalArea: TerminalAreaController { root.terminalArea }
+}
+
+extension MainWindowController: NSToolbarDelegate {
+    private static let sidebarButton = NSToolbarItem.Identifier("PlumSidebarButton")
+
+    public func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { [Self.sidebarButton] }
+    public func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { [Self.sidebarButton] }
+
+    public func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
+                        willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
+        guard itemIdentifier == Self.sidebarButton else { return nil }
+        let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+        let label = String(localized: "사이드바 보기/가리기")
+        item.image = NSImage(systemSymbolName: "sidebar.left", accessibilityDescription: label)
+        item.label = label
+        item.toolTip = label + " (⌃⌘S)"
+        item.isBordered = true
+        item.target = self
+        item.action = #selector(toggleSidebar)
+        return item
+    }
 }
 
 /// The find bar: a field, "3/12", previous and next, close.

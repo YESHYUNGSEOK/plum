@@ -121,7 +121,7 @@ Every command for moving between workspaces and tabs is in the Go menu. The keys
 
 Changed since before 0.1: ⌘1–9 picks a workspace, not a tab (as in cmux). Tabs are ⌃1–9.
 
-Also: new workspace ⌘N, new tab ⌘T (a terminal; the + after the tabs and the File menu also open Claude or Codex), close tab ⌘W, add project ⌘O, text size ⌘+ ⌘- ⌘0, show/hide sidebar ⌃⌘S (drag its edge to resize, double-click the edge for the default width); in the terminal, start/end of line ⌘← ⌘→, word left/right ⌥← ⌥→, delete line ⌘⌫.
+Also: new workspace ⌘N, new tab ⌘T (a terminal; the + after the tabs and the File menu also open Claude or Codex), close tab ⌘W, add project ⌘O, text size ⌘+ ⌘- ⌘0, show/hide sidebar ⌃⌘S or the sidebar button beside the window buttons (drag its edge to resize, double-click the edge for the default width); in the terminal, start/end of line ⌘← ⌘→, word left/right ⌥← ⌥→, delete line ⌘⌫.
 
 In the terminal:
 - Find ⌘F (scrollback too, ASCII case ignored). Return or ⌘G goes up to older output, ⇧Return or ⇧⌘G back down, Esc closes. The match found is the selection, so ⌘C copies it.
