@@ -74,7 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         model.debugInstallUpdate = { zip, signature, version in
             do {
                 let app = try Updates.install(try Data(contentsOf: zip), signature: try Data(contentsOf: signature), version: version)
-                DispatchQueue.main.async { _ = AppActions.relaunch(app) }
+                DispatchQueue.main.async { AppActions.relaunch(app) }
                 return "installed " + app.path
             } catch {
                 return "failed: " + error.localizedDescription
@@ -105,6 +105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     /// The terminal host keeps every terminal; it gets their screens to keep too.
     func applicationWillTerminate(_ notification: Notification) {
         model.parkTerminals()
+        AppActions.reopenIfUpdated()
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {

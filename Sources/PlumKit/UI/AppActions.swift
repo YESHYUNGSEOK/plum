@@ -125,12 +125,16 @@ enum AppActions {
                     title: String(localized: "새 버전이 있습니다: \(release.tag)"),
                     summary: String(localized: "지금 버전은 \(Updates.current)입니다. 내려받아 설치하고 Plum을 다시 시작할까요? 터미널과 그 안의 프로그램은 그대로 이어집니다."),
                     sections: [], action: String(localized: "설치하고 다시 시작"), destructive: false)) else { return }
+                // The daily check and the menu can both get here.
+                guard !installing else { return }
+                installing = true
+                defer { installing = false }
                 model.errorMessage = String(localized: "업데이트를 내려받는 중…")
                 do {
                     let app = try await Updates.install(release)
-                    if !relaunch(app) {
-                        model.errorMessage = String(localized: "업데이트를 설치했습니다. Plum을 다시 시작하면 적용됩니다.")
-                    }
+                    // Still true if the quit is cancelled.
+                    model.errorMessage = String(localized: "업데이트를 설치했습니다. Plum을 다시 시작하면 적용됩니다.")
+                    relaunch(app)
                 } catch {
                     model.errorMessage = nil
                     await offerPage(model, release, title: String(localized: "업데이트를 설치하지 못했습니다"),
@@ -151,10 +155,22 @@ enum AppActions {
         if open { NSWorkspace.shared.open(release.page) }
     }
 
-    /// Quits, and opens `app` once this process is gone. Quitting parks the
-    /// terminals in the host as usual; the new copy picks them up. False if
-    /// the helper that reopens it couldn't start (Plum then keeps running).
-    static func relaunch(_ app: URL) -> Bool {
+    private static var installing = false
+    /// The updated app, opened once this process is gone. Only a quit that
+    /// goes ahead opens it: the user can still cancel the quit.
+    private static var reopenAfterQuit: URL?
+
+    /// Quits, and the updated `app` opens after (`reopenIfUpdated`). Quitting
+    /// parks the terminals in the host as usual; the new copy picks them up.
+    static func relaunch(_ app: URL) {
+        reopenAfterQuit = app
+        NSApp.terminate(nil)
+    }
+
+    /// As Plum quits: a helper that waits for this process to end, then
+    /// opens the updated app.
+    static func reopenIfUpdated() {
+        guard let app = reopenAfterQuit else { return }
         // A shell of its own session that inherits none of the app's
         // descriptors (the host would otherwise see a connection kept open).
         var attributes: posix_spawnattr_t?
@@ -171,9 +187,7 @@ enum AppActions {
         let argv: [UnsafeMutablePointer<CChar>?] = (["/bin/sh", "-c", script, "sh"] + carried + [app.path]).map { strdup($0) } + [nil]
         defer { argv.forEach { free($0) } }
         var pid: pid_t = 0
-        guard posix_spawn(&pid, "/bin/sh", nil, &attributes, argv, environ) == 0 else { return false }
-        NSApp.terminate(nil)
-        return true
+        posix_spawn(&pid, "/bin/sh", nil, &attributes, argv, environ) // if not, the user opens it again
     }
 
     static func ask(_ model: AppModel, _ confirmation: Confirmation) async -> Bool {

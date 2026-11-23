@@ -183,6 +183,9 @@ extension AppModel {
             let point = terminal.windowPoint(column: Int(numbers[0]), row: Int(numbers[1]))
             let flags = NSEvent.ModifierFlags(rawValue: numbers.count > 2 ? numbers[2] : 0)
             let clicks = numbers.count > 3 ? Int(numbers[3]) : 1
+            // What a click there lands on: the terminal that was meant, or something over it.
+            let landed = window.contentView?.superview?.hitTest(point)
+            let target = landed === terminal ? "terminal" : landed.map { String(describing: type(of: $0)) } ?? "nothing"
             for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
                 guard let event = NSEvent.mouseEvent(
                     with: type, location: point, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime,
@@ -190,7 +193,7 @@ extension AppModel {
                 else { return "no event" }
                 NSApp.sendEvent(event)
             }
-            return "ok"
+            return "ok " + target
         case "press": // column|row[|right]: a press and release handed to the terminal itself, past
             // the background window's "first click only brings it forward"
             let numbers = fields.compactMap { Int($0) }
@@ -249,6 +252,10 @@ extension AppModel {
                 terminal.insertText(fields[1], replacementRange: none)
             }
             return terminal.hasMarkedText() ? "composing" : "committed"
+        case "link": // column|row: the program's link at that viewport cell, and the line there
+            let cell = fields.compactMap { Int($0) }
+            guard cell.count == 2, let session = activeTab?.session else { return "bad arguments" }
+            return (session.hyperlink(at: (cell[0], cell[1])) ?? "-") + " | " + (session.line(at: (cell[0], cell[1]))?.text ?? "-")
         case "links": // links a click would have opened
             return DebugLog.links.joined(separator: " ")
         case "paste": // text (\n unescaped) put on the debug pasteboard, then Edit > Paste
@@ -256,6 +263,9 @@ extension AppModel {
             TerminalView.pasteboard.setString(argument.replacingOccurrences(of: "\\n", with: "\n"), forType: .string)
             // To what holds the keyboard: a window in the background has no key window to route by.
             guard let responder = debugWindow?()?.firstResponder else { return "no responder" }
+            // A dialog may hold the keyboard (multi-line paste asks first);
+            // sent straight to something without paste:, the action throws.
+            guard responder.responds(to: #selector(NSText.paste(_:))) else { return "no paste in \(type(of: responder))" }
             NSApp.sendAction(#selector(NSText.paste(_:)), to: responder, from: nil)
             return "ok"
         case "trace-close": // closes the dialog; read the card's opacity over time with `trace`

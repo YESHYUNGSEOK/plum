@@ -60,11 +60,12 @@ public enum Updates {
     }
 
     public enum InstallError: LocalizedError, Equatable {
-        case noArchive, badSignature, notPlum, cannotUnpack, cannotReplace(String)
+        case noArchive, download, badSignature, notPlum, cannotUnpack, cannotReplace(String)
 
         public var errorDescription: String? {
             switch self {
             case .noArchive: String(localized: "이 릴리스에는 이 Mac용 서명된 파일이 없습니다.")
+            case .download: String(localized: "업데이트 파일을 내려받지 못했습니다.")
             case .badSignature: String(localized: "내려받은 파일의 서명이 맞지 않아 설치하지 않았습니다.")
             case .notPlum: String(localized: "내려받은 파일이 이 버전의 Plum이 아닙니다.")
             case .cannotUnpack: String(localized: "내려받은 파일을 풀지 못했습니다.")
@@ -122,6 +123,10 @@ public enum Updates {
     /// offered instead.
     public static func cannotInstall(_ release: Release, app: URL = Bundle.main.bundleURL) -> String? {
         if release.archive == nil { return InstallError.noArchive.errorDescription }
+        // `swift run` and the like: the "app" is the folder the binary is in.
+        if app.pathExtension != "app" || Bundle.main.bundleIdentifier == nil {
+            return String(localized: "Plum.app으로 실행할 때만 스스로 업데이트합니다.")
+        }
         // Opened straight from a download, macOS runs a read-only copy elsewhere.
         if app.path.contains("/AppTranslocation/") {
             return String(localized: "Plum이 macOS가 정한 임시 위치에서 실행 중입니다. 응용 프로그램 폴더로 옮긴 뒤 다시 여세요.")
@@ -135,21 +140,28 @@ public enum Updates {
     /// Downloads, checks and swaps in `release`; returns where the new app is.
     public static func install(_ release: Release, app: URL = Bundle.main.bundleURL) async throws -> URL {
         guard let archive = release.archive else { throw InstallError.noArchive }
-        let (zip, _) = try await URLSession.shared.data(from: archive.zip)
-        let (signature, _) = try await URLSession.shared.data(from: archive.signature)
+        let zip = try await download(archive.zip)
+        let signature = try await download(archive.signature)
         return try install(zip, signature: signature, version: release.version, app: app)
+    }
+
+    /// A failed download (rate limit, outage) is not a bad signature.
+    private static func download(_ url: URL) async throws -> Data {
+        let (data, response) = try await URLSession.shared.data(from: url)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw InstallError.download }
+        return data
     }
 
     /// The same, for a zip and signature at hand.
     public static func install(_ zip: Data, signature: Data, version: String, app: URL = Bundle.main.bundleURL) throws -> URL {
         guard verify(zip, signature: signature, publicKey: publicKey) else { throw InstallError.badSignature }
+        guard let bundleID = Bundle.main.bundleIdentifier else { throw InstallError.notPlum }
         // On the app's own volume, so the swap is a rename.
         let work = try FileManager.default.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: app, create: true)
         defer { try? FileManager.default.removeItem(at: work) }
         let file = work.appendingPathComponent("update.zip")
         try zip.write(to: file)
-        let fresh = try unpack(file, into: work, version: version,
-                               bundleID: Bundle.main.bundleIdentifier ?? "dev.plum.Plum")
+        let fresh = try unpack(file, into: work, version: version, bundleID: bundleID)
         return try replace(app, with: fresh)
     }
 

@@ -42,6 +42,7 @@ if [ -n "${PLUM_NOTARY_PROFILE:-}" ]; then
 fi
 
 KEY="${PLUM_UPDATE_KEY:-$HOME/.config/plum/update-signing-key}"
+rm -f "$ZIP.sig" # never one left from an earlier build
 if [ -f "$KEY" ]; then
   swift scripts/update-signing.swift sign "$ZIP" "$KEY" > "$ZIP.sig"
 else
@@ -50,4 +51,4 @@ fi
 
 echo "OK: $ZIP"
 shasum -a 256 "$ZIP"
-[ -f "$ZIP.sig" ] && echo "OK: $ZIP.sig (upload it with the zip)"
+if [ -f "$ZIP.sig" ]; then echo "OK: $ZIP.sig (upload it with the zip)"; fi

@@ -68,6 +68,12 @@ final class UpdateInstallTests: XCTestCase {
               {"name": "Plum-0.2.0-\(Updates.architecture).zip", "browser_download_url": "https://github.com/x/z"},
               {"name": "Plum-0.2.0-\(Updates.architecture).zip.sig", "browser_download_url": "https://github.com/x/z.sig"}]}
             """.utf8))), app: installed), "a writable folder, not translocated")
+        let signed = try JSONDecoder().decode(Updates.Release.self, from: Data("""
+            {"tag_name": "v0.2.0", "html_url": "https://github.com/x", "assets": [
+              {"name": "Plum-0.2.0-\(Updates.architecture).zip", "browser_download_url": "https://github.com/x/z"},
+              {"name": "Plum-0.2.0-\(Updates.architecture).zip.sig", "browser_download_url": "https://github.com/x/z.sig"}]}
+            """.utf8))
+        XCTAssertNotNil(Updates.cannotInstall(signed, app: folder), "not an app bundle (swift run): never replaced")
     }
 
     private func makeApp(at parent: URL, id: String, version: String) throws -> URL {
