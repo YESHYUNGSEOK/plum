@@ -1,0 +1,21 @@
+Sources/PlumKit/Terminal/TerminalView.swift
+  s_01ae376ab6d37d::t_72d8f5c82b0f6e 57-60
+Tests/PlumKitTests/TerminalMoreTests.swift
+  s_01ae376ab6d37d::t_0b86d173a81208 7-18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "27a1ee7536eb4763822279ae40087d0837eaba22",
+  "prompts": {},
+  "sessions": {
+    "s_01ae376ab6d37d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_01ae376ab6d37d",
+        "model": "unknown"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    }
+  }
+}
