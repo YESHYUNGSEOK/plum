@@ -29,6 +29,8 @@ A native macOS app for AI coding agents side by side, each in a git worktree of 
 
 As in Orca, add a project (a git repository), add a workspace, and Plum makes the branch, the worktree and a terminal for your agent, all in one window. And the terminal is lighter and faster than Ghostty: measured against the latest Ghostty (1.4.0) on the same Mac, taking turns, it uses a quarter of the memory (37 MB against 148 MB), puts a key press on screen in 18.5 ms against 24.0 ms, and handles all seven kinds of output 1.05-2.64x faster ([Performance](#performance)).
 
+<p align="center"><img src="docs/assets/bench.svg" width="860" alt="Plum against Ghostty 1.4.0. Memory with 1 terminal 37 MB against 148 MB, with 10 terminals 49 MB against 214 MB, key press to screen 18.5 ms against 24.0 ms, idle CPU per 30 s 1 ms against 107 ms, output throughput with Ghostty as 1: dense colors 2.64, Unicode 1.42, scrolling 1.32, cursor movement 1.29, TUI redraw 1.17, scroll region 1.07, plain text 1.05"></p>
+
 Status: **0.1 (first public release)**. The design (in Korean) is in [`docs/superpowers/specs/2026-11-16-plum-design.md`](docs/superpowers/specs/2026-11-16-plum-design.md). The UI is in English and Korean, following the system language.
 
 ## At a glance
@@ -236,7 +238,7 @@ Sources/PlumKit/UI/            App (menus, notifications, quitting), MainWindow 
                                Sheets (dialog content), AppActions (actions that ask first), Controls, Theme
 Resources/                     app icon (made by scripts/make-icon.sh), en.lproj and ko.lproj UI strings
 Vendor/                        libghostty-vt xcframework (made by build-vt.sh, not in git)
-scripts/                       build-vt.sh, bundle.sh, release.sh, update-signing.swift (the update key and signatures); readme-plum.py draws the README's plum (docs/assets/plum.svg) and a small one for the icon (icon/AsciiPlumFrames.swift); make-icon.sh makes the app icon from it
+scripts/                       build-vt.sh, bundle.sh, release.sh, update-signing.swift (the update key and signatures); readme-bench.py draws the README's comparison chart (docs/assets/bench*.svg), readme-plum.py the README's plum (docs/assets/plum.svg) and a small one for the icon (icon/AsciiPlumFrames.swift); make-icon.sh makes the app icon from it
 ```
 
 Terminal emulation is [libghostty-vt](https://libghostty.tip.ghostty.org/) 1.0.1 (MIT); the renderer, fonts, input and pty are Plum's own. That is the only dependency.

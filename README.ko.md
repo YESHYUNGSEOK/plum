@@ -29,6 +29,8 @@ AI 코딩 에이전트 여러 개를 각자의 git worktree에서 나란히 돌�
 
 Orca처럼 프로젝트(git 저장소)를 등록하고 워크스페이스를 추가하면 브랜치와 worktree, 에이전트를 돌릴 터미널까지 한 창에 준비된다. 그러면서 터미널은 Ghostty보다 가볍고 빠르다. 같은 Mac에서 최신 Ghostty(1.4.0)와 번갈아 재 보면 메모리는 1/4(37MB 대 148MB), 키 입력이 화면에 나오기까지 18.5ms 대 24.0ms, 출력 처리는 7종류 모두 1.05~2.64배 빠르다([측정 결과](#측정-결과)).
 
+<p align="center"><img src="docs/assets/bench.ko.svg" width="860" alt="Plum과 Ghostty 1.4.0 비교. 메모리 터미널 1개 37MB 대 148MB, 10개 49MB 대 214MB, 키 입력에서 화면까지 18.5ms 대 24.0ms, 쉬는 동안 CPU 30초에 1ms 대 107ms, 출력 처리 속도는 Ghostty를 1로 할 때 색이 많은 화면 2.64, 유니코드 1.42, 스크롤 1.32, 커서 이동 1.29, TUI 다시 그리기 1.17, 스크롤 영역 1.07, 일반 텍스트 1.05"></p>
+
 상태: **0.1 (초기 공개판)**. 설계는 [`docs/superpowers/specs/2026-11-16-plum-design.md`](docs/superpowers/specs/2026-11-16-plum-design.md)에 있다.
 
 ## 한눈에
@@ -291,7 +293,7 @@ Sources/PlumKit/UI/            App(메뉴·알림·종료 확인), MainWindow(�
                                Sheets(대화상자 내용), AppActions(확인이 필요한 동작), Controls(버튼·상태 표시·토스트), Theme
 Sources/Plum/                  진입점
 Vendor/                        libghostty-vt xcframework (build-vt.sh가 생성, git에는 넣지 않음)
-scripts/                       build-vt.sh, bundle.sh, release.sh, update-signing.swift(업데이트 서명 키와 서명). readme-plum.py는 README 맨 위 자두(docs/assets/plum.svg)와 아이콘용 작은 자두(icon/AsciiPlumFrames.swift)를 그리고, make-icon.sh는 그것으로 앱 아이콘을 만든다
+scripts/                       build-vt.sh, bundle.sh, release.sh, update-signing.swift(업데이트 서명 키와 서명). readme-bench.py는 README의 비교 그래프(docs/assets/bench*.svg)를, readme-plum.py는 README 맨 위 자두(docs/assets/plum.svg)와 아이콘용 작은 자두(icon/AsciiPlumFrames.swift)를 그리고, make-icon.sh는 그것으로 앱 아이콘을 만든다
 ```
 
 VT 해석과 화면 상태는 [libghostty-vt](https://libghostty.tip.ghostty.org/) 1.0.1(MIT)에 맡기고, 렌더러·글꼴·입력·pty는 직접 만들었다. 외부 의존성은 이것 하나다.

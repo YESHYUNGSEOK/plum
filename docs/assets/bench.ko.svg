@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="504" viewBox="0 0 960 504" role="img" aria-labelledby="title">
+<title id="title">Plum vs Ghostty 1.4.0: Memory, 1 terminal 37 MB vs 148 MB; Memory, 10 terminals 49 MB vs 214 MB; Key press → on screen 18.5 ms vs 24.0 ms; Idle CPU per 30 s 1 ms vs 107 ms; output Dense colors 2.64x, Unicode 1.42x, Scrolling 1.32x, Cursor movement 1.29x, TUI redraw 1.17x, Scroll region 1.07x, Plain text 1.05x</title>
+<defs><linearGradient id="plum" x1="0" x2="1"><stop offset="0" stop-color="#8143C6"/><stop offset="1" stop-color="#C58AF9"/></linearGradient></defs>
+<style>
+text{font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Segoe UI',Helvetica,Arial,sans-serif}
+.h{font-size:15px;font-weight:600;fill:#E6E6EB}
+.n{font-size:12px;fill:#8E8E99}
+.r{font-size:13px;fill:#B9B9C2}
+.v{font-family:Menlo,'SF Mono',ui-monospace,Consolas,monospace;font-size:12.5px;animation:show 8s infinite}
+.b{transform-box:fill-box;transform-origin:0 50%;animation:fill 8s cubic-bezier(.2,.8,.2,1) infinite}
+@keyframes fill{0%{transform:scaleX(0);opacity:1}16%,90%{transform:scaleX(1);opacity:1}100%{transform:scaleX(1);opacity:0}}
+@keyframes show{0%,10%{opacity:0}18%,90%{opacity:1}100%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.b,.v{animation:none}}
+</style>
+<rect width="960" height="504" rx="14" fill="#141417"/>
+<path d="M0 34V14A14 14 0 0 1 14 0H946A14 14 0 0 1 960 14V34Z" fill="#1E1E22"/>
+<path d="M0 34H960" stroke="#2C2C32"/>
+<rect x="0.5" y="0.5" width="959" height="503" rx="13.5" fill="none" stroke="#2C2C32"/>
+<circle cx="22" cy="17.0" r="6" fill="#FF5F57"/><circle cx="42" cy="17.0" r="6" fill="#FEBC2E"/><circle cx="62" cy="17.0" r="6" fill="#28C840"/>
+<text x="480" y="21.5" text-anchor="middle" fill="#8E8E99" font-size="13">plum</text>
+<text x="32" y="80" font-size="22" font-weight="700" fill="#E6E6EB">Plum vs Ghostty 1.4.0</text>
+<rect x="710" y="67" width="12" height="12" rx="3" fill="url(#plum)"/><text x="728" y="77.5" class="r">Plum</text><rect x="788" y="67" width="12" height="12" rx="3" fill="#4A4A55"/><text x="806" y="77.5" class="r">Ghostty 1.4.0</text>
+<path d="M32 100H928" stroke="#2C2C32"/>
+<text x="32" y="138" class="h">메모리, 터미널 1개</text>
+<text x="452" y="138" class="n" text-anchor="end">낮을수록 좋음</text>
+<text x="32" y="163" class="r">Plum</text>
+<rect x="96" y="152" width="278" height="13" rx="6.5" fill="#1E1E22"/>
+<rect x="96" y="152" width="69.5" height="13" rx="6.5" fill="url(#plum)" class="b" style="animation-delay:0.25s"/>
+<text x="173.5" y="163.5" class="v" fill="#E6E6EB" style="animation-delay:0.25s">37 MB</text>
+<text x="32" y="185" class="r">Ghostty</text>
+<rect x="96" y="174" width="278" height="13" rx="6.5" fill="#1E1E22"/>
+<rect x="96" y="174" width="278.0" height="13" rx="6.5" fill="#4A4A55" class="b" style="animation-delay:0.32s"/>
+<text x="382.0" y="185.5" class="v" fill="#8E8E99" style="animation-delay:0.32s">148 MB</text>
+<text x="32" y="222" class="h">메모리, 터미널 10개</text>
+<text x="452" y="222" class="n" text-anchor="end">낮을수록 좋음</text>
+<text x="32" y="247" class="r">Plum</text>
+<rect x="96" y="236" width="278" height="13" rx="6.5" fill="#1E1E22"/>
+<rect x="96" y="236" width="63.7" height="13" rx="6.5" fill="url(#plum)" class="b" style="animation-delay:0.39s"/>
+<text x="167.7" y="247.5" class="v" fill="#E6E6EB" style="animation-delay:0.39s">49 MB</text>
+<text x="32" y="269" class="r">Ghostty</text>
+<rect x="96" y="258" width="278" height="13" rx="6.5" fill="#1E1E22"/>
+<rect x="96" y="258" width="278.0" height="13" rx="6.5" fill="#4A4A55" class="b" style="animation-delay:0.46s"/>
+<text x="382.0" y="269.5" class="v" fill="#8E8E99" style="animation-delay:0.46s">214 MB</text>
+<text x="32" y="306" class="h">키 입력 → 화면</text>
+<text x="452" y="306" class="n" text-anchor="end">낮을수록 좋음</text>
+<text x="32" y="331" class="r">Plum</text>
+<rect x="96" y="320" width="278" height="13" rx="6.5" fill="#1E1E22"/>
+<rect x="96" y="320" width="214.3" height="13" rx="6.5" fill="url(#plum)" class="b" style="animation-delay:0.53s"/>
+<text x="318.3" y="331.5" class="v" fill="#E6E6EB" style="animation-delay:0.53s">18.5 ms</text>
+<text x="32" y="353" class="r">Ghostty</text>
+<rect x="96" y="342" width="278" height="13" rx="6.5" fill="#1E1E22"/>
+<rect x="96" y="342" width="278.0" height="13" rx="6.5" fill="#4A4A55" class="b" style="animation-delay:0.60s"/>
+<text x="382.0" y="353.5" class="v" fill="#8E8E99" style="animation-delay:0.60s">24.0 ms</text>
+<text x="32" y="390" class="h">쉬는 동안 CPU (30초)</text>
+<text x="452" y="390" class="n" text-anchor="end">낮을수록 좋음</text>
+<text x="32" y="415" class="r">Plum</text>
+<rect x="96" y="404" width="278" height="13" rx="6.5" fill="#1E1E22"/>
+<rect x="96" y="404" width="3.0" height="13" rx="6.5" fill="url(#plum)" class="b" style="animation-delay:0.67s"/>
+<text x="107.0" y="415.5" class="v" fill="#E6E6EB" style="animation-delay:0.67s">1 ms</text>
+<text x="32" y="437" class="r">Ghostty</text>
+<rect x="96" y="426" width="278" height="13" rx="6.5" fill="#1E1E22"/>
+<rect x="96" y="426" width="278.0" height="13" rx="6.5" fill="#4A4A55" class="b" style="animation-delay:0.74s"/>
+<text x="382.0" y="437.5" class="v" fill="#8E8E99" style="animation-delay:0.74s">107 ms</text>
+<text x="500" y="138" class="h">출력 처리 속도</text>
+<text x="928" y="138" class="n" text-anchor="end">Ghostty = 1배, 높을수록 좋음</text>
+<text x="500" y="170" class="r">색이 많은 화면</text>
+<rect x="632" y="152" width="238" height="13" rx="6.5" fill="#1E1E22"/>
+<rect x="632" y="152" width="238.0" height="13" rx="6.5" fill="url(#plum)" class="b" style="animation-delay:0.81s"/>
+<text x="878.0" y="163.5" class="v" fill="#E6E6EB" style="animation-delay:0.81s">2.64배</text>
+<rect x="632" y="169" width="238" height="8" rx="4.0" fill="#1E1E22"/>
+<rect x="632" y="169" width="90.2" height="8" rx="4.0" fill="#4A4A55" class="b" style="animation-delay:0.88s"/>
+<text x="500" y="214" class="r">유니코드</text>
+<rect x="632" y="196" width="238" height="13" rx="6.5" fill="#1E1E22"/>
+<rect x="632" y="196" width="128.0" height="13" rx="6.5" fill="url(#plum)" class="b" style="animation-delay:0.95s"/>
+<text x="768.0" y="207.5" class="v" fill="#E6E6EB" style="animation-delay:0.95s">1.42배</text>
+<rect x="632" y="213" width="238" height="8" rx="4.0" fill="#1E1E22"/>
+<rect x="632" y="213" width="90.2" height="8" rx="4.0" fill="#4A4A55" class="b" style="animation-delay:1.02s"/>
+<text x="500" y="258" class="r">스크롤</text>
+<rect x="632" y="240" width="238" height="13" rx="6.5" fill="#1E1E22"/>
+<rect x="632" y="240" width="119.0" height="13" rx="6.5" fill="url(#plum)" class="b" style="animation-delay:1.09s"/>
+<text x="759.0" y="251.5" class="v" fill="#E6E6EB" style="animation-delay:1.09s">1.32배</text>
+<rect x="632" y="257" width="238" height="8" rx="4.0" fill="#1E1E22"/>
+<rect x="632" y="257" width="90.2" height="8" rx="4.0" fill="#4A4A55" class="b" style="animation-delay:1.16s"/>
+<text x="500" y="302" class="r">커서 이동</text>
+<rect x="632" y="284" width="238" height="13" rx="6.5" fill="#1E1E22"/>
+<rect x="632" y="284" width="116.3" height="13" rx="6.5" fill="url(#plum)" class="b" style="animation-delay:1.23s"/>
+<text x="756.3" y="295.5" class="v" fill="#E6E6EB" style="animation-delay:1.23s">1.29배</text>
+<rect x="632" y="301" width="238" height="8" rx="4.0" fill="#1E1E22"/>
+<rect x="632" y="301" width="90.2" height="8" rx="4.0" fill="#4A4A55" class="b" style="animation-delay:1.30s"/>
+<text x="500" y="346" class="r">TUI 다시 그리기</text>
+<rect x="632" y="328" width="238" height="13" rx="6.5" fill="#1E1E22"/>
+<rect x="632" y="328" width="105.5" height="13" rx="6.5" fill="url(#plum)" class="b" style="animation-delay:1.37s"/>
+<text x="745.5" y="339.5" class="v" fill="#E6E6EB" style="animation-delay:1.37s">1.17배</text>
+<rect x="632" y="345" width="238" height="8" rx="4.0" fill="#1E1E22"/>
+<rect x="632" y="345" width="90.2" height="8" rx="4.0" fill="#4A4A55" class="b" style="animation-delay:1.44s"/>
+<text x="500" y="390" class="r">스크롤 영역</text>
+<rect x="632" y="372" width="238" height="13" rx="6.5" fill="#1E1E22"/>
+<rect x="632" y="372" width="96.5" height="13" rx="6.5" fill="url(#plum)" class="b" style="animation-delay:1.51s"/>
+<text x="736.5" y="383.5" class="v" fill="#E6E6EB" style="animation-delay:1.51s">1.07배</text>
+<rect x="632" y="389" width="238" height="8" rx="4.0" fill="#1E1E22"/>
+<rect x="632" y="389" width="90.2" height="8" rx="4.0" fill="#4A4A55" class="b" style="animation-delay:1.58s"/>
+<text x="500" y="434" class="r">일반 텍스트</text>
+<rect x="632" y="416" width="238" height="13" rx="6.5" fill="#1E1E22"/>
+<rect x="632" y="416" width="94.7" height="13" rx="6.5" fill="url(#plum)" class="b" style="animation-delay:1.65s"/>
+<text x="734.7" y="427.5" class="v" fill="#E6E6EB" style="animation-delay:1.65s">1.05배</text>
+<rect x="632" y="433" width="238" height="8" rx="4.0" fill="#1E1E22"/>
+<rect x="632" y="433" width="90.2" height="8" rx="4.0" fill="#4A4A55" class="b" style="animation-delay:1.72s"/>
+<text x="32" y="488" class="n">같은 Mac(M4 Pro)에서 번갈아 측정. 메모리·지연·CPU 2026-11-17, 출력 2026-11-23. 자세한 내용은 docs/benchmarks.</text>
+</svg>
