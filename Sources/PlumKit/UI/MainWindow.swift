@@ -29,9 +29,8 @@ struct TabBarView: View {
     @State private var barWidth: CGFloat = 0
     @State private var chipWidth: CGFloat = 0
 
-    // Room for the window buttons when no sidebar is beside the bar, and in
-    // the main window for the sidebar button after them.
-    private var leadingInset: CGFloat { scope != .selection ? 82 : model.sidebarCollapsed ? 128 : 14 }
+    // Room for the window buttons when no sidebar is beside the bar.
+    private var leadingInset: CGFloat { scope != .selection ? 82 : 14 }
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 0) {
@@ -99,7 +98,6 @@ struct TabBarView: View {
         .background(Theme.tabBar)
         // The open surface moves to the tab chosen; tabs fade in and out.
         .animation(Motion.settle, value: activeKey)
-        .animation(Motion.layout(reduceMotion), value: model.sidebarCollapsed)
         .id(model.state.settings.accent)
     }
 
@@ -391,7 +389,6 @@ struct EmptyStateView: View {
                 Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
                     shortcut("⌘N", "새 워크스페이스")
                     shortcut("⌘T", "새 탭")
-                    shortcut("⌃⌘S", "사이드바 보기/가리기")
                 }
                 .padding(.top, 14)
             } else if let pending = model.pending.first(where: { $0.id == model.selection }) {
@@ -1026,7 +1023,6 @@ final class RootViewController: NSViewController {
     func focusSidebar() {
         guard model.sheet == nil, !model.workspaceOrder.isEmpty else { return }
         if sidebarKeys != nil { return leaveSidebar(focusTerminal: true) }
-        if model.sidebarCollapsed { toggleSidebar() }
         model.sidebarHasKeyboard = true
         sidebarKeys = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown]) { [weak self] event in
             guard let self, event.window === view.window else { return event }
@@ -1057,33 +1053,6 @@ final class RootViewController: NSViewController {
         sidebarKeys = nil
         model.sidebarHasKeyboard = false
         if focusTerminal { terminalArea.focusTerminal() }
-    }
-
-    func toggleSidebar() {
-        let collapse = !model.sidebarCollapsed
-        model.sidebarCollapsed = collapse
-        if !collapse { sidebar.view.isHidden = false }
-        sidebarEdge.isHidden = collapse
-        let width = collapse ? 0 : openWidth
-        // Animations don't advance in a window nobody can see, which would
-        // leave the layout stuck halfway.
-        guard view.window?.occlusionState.contains(.visible) == true else {
-            sidebarWidth.constant = width
-            sidebar.view.alphaValue = collapse ? 0 : 1
-            sidebar.view.isHidden = collapse
-            return
-        }
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.18
-            context.allowsImplicitAnimation = true
-            sidebarWidth.animator().constant = width
-            sidebar.view.animator().alphaValue = collapse ? 0 : 1
-        } completionHandler: { [weak self] in
-            MainActor.assumeIsolated {
-                // Hidden, not just zero-width, so keyboard and VoiceOver skip it.
-                if self?.model.sidebarCollapsed == true { self?.sidebar.view.isHidden = true }
-            }
-        }
     }
 }
 
@@ -1259,20 +1228,13 @@ public final class MainWindowController: NSWindowController {
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.titlebarSeparatorStyle = .none
+        window.toolbar = NSToolbar(identifier: "PlumMain")
+        window.toolbarStyle = .unified
         // The window moves by that title bar strip only, not by its whole
         // background: there a drag or double-click on a sidebar row or the
         // sidebar's edge would move the window instead of reaching them.
 
         super.init(window: window)
-        // Its one item: the sidebar button, beside the window buttons, where
-        // it stays while the sidebar is folded away. The delegate is set
-        // before the window gets the toolbar, which asks it for items then.
-        let toolbar = NSToolbar(identifier: "PlumMain")
-        toolbar.delegate = self
-        toolbar.allowsUserCustomization = false
-        toolbar.displayMode = .iconOnly
-        window.toolbar = toolbar
-        window.toolbarStyle = .unified
         window.contentViewController = root
         window.setContentSize(NSSize(width: 1180, height: 760))
         window.center()
@@ -1282,33 +1244,11 @@ public final class MainWindowController: NSWindowController {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    @objc public func toggleSidebar() { root.toggleSidebar() }
     public func focusSidebar() { root.focusSidebar() }
     func traceDialogClose(_ done: @escaping (String) -> Void) { root.traceDialogClose(done) }
     public func focusTerminal() { root.terminalArea.focusTerminal() }
     var terminalView: TerminalView? { root.terminalArea.terminal }
     var terminalArea: TerminalAreaController { root.terminalArea }
-}
-
-extension MainWindowController: NSToolbarDelegate {
-    private static let sidebarButton = NSToolbarItem.Identifier("PlumSidebarButton")
-
-    public func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { [Self.sidebarButton] }
-    public func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { [Self.sidebarButton] }
-
-    public func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
-                        willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
-        guard itemIdentifier == Self.sidebarButton else { return nil }
-        let item = NSToolbarItem(itemIdentifier: itemIdentifier)
-        let label = String(localized: "사이드바 보기/가리기")
-        item.image = NSImage(systemSymbolName: "sidebar.left", accessibilityDescription: label)
-        item.label = label
-        item.toolTip = label + " (⌃⌘S)"
-        item.isBordered = true
-        item.target = self
-        item.action = #selector(toggleSidebar)
-        return item
-    }
 }
 
 /// The find bar: a field, "3/12", previous and next, close.

@@ -31,7 +31,7 @@ As in Orca, add a project (a git repository), add a workspace, and Plum makes th
 
 <p align="center"><img src="docs/assets/bench.svg" width="860" alt="Plum against Ghostty 1.4.0. Memory with 1 terminal 37 MB against 148 MB, with 10 terminals 49 MB against 214 MB, key press to screen 18.5 ms against 24.0 ms, idle CPU per 30 s 1 ms against 107 ms, output throughput with Ghostty as 1: dense colors 2.64, Unicode 1.42, scrolling 1.32, cursor movement 1.29, TUI redraw 1.17, scroll region 1.07, plain text 1.05"></p>
 
-Status: **0.1 (first public release)**. The design (in Korean) is in [`docs/superpowers/specs/2026-11-16-plum-design.md`](docs/superpowers/specs/2026-11-16-plum-design.md). The UI is in English and Korean, following the system language.
+Status: **0.1 (first public release)**. The design (in Korean) is in [`docs/superpowers/specs/2026-11-16-plum-design.md`](docs/superpowers/specs/2026-11-16-plum-design.md). The UI is in English and Korean, following the system language unless you pick one in Settings.
 
 ## At a glance
 
@@ -95,7 +95,8 @@ To ship a build macOS opens directly, `release.sh` signs with the hardened runti
    - Right-click a project's name: New Workspace, Project Settings, Collapse, Show in Finder, Open In, Remove from Plum.
    - Right-click a tab: Rename Tab (or double-click its title; empty gives back the program's title), Close Tab, Close Other Tabs, Close Tabs to the Right.
    - Right-click (or Control-click) menus are Plum's own: ↑↓ to pick, Return to run, → to open a submenu (Copy, Open In) and ← to close it, Esc or a click outside to dismiss.
-6. **Terminals outlive the app**: a separate terminal host process (the same executable with `--terminal-host`) owns them. Quit (⌘Q, or close the window) and shells, agents and dev servers keep running; start Plum again and tabs come back in their order, with their screen and scrollback, titles (yours and the agents' conversation titles), which one was open, and agent states reported meanwhile (waiting, done). So quitting doesn't ask. With no terminals left, the host ends itself after a minute.
+6. **Terminals outlive the app**: a separate terminal host process (the same executable with `--terminal-host`) owns them. Quit (⌘Q) and shells, agents and dev servers keep running; start Plum again and tabs come back in their order, with their screen and scrollback, titles (yours and the agents' conversation titles), which one was open, and agent states reported meanwhile (waiting, done). So quitting doesn't ask. With no terminals left, the host ends itself after a minute.
+   - The window's red button only hides it: Plum stays in the Dock and keeps notifying, and its Dock icon or a notification brings the window back. ⌘Q quits.
    - Closing a tab with a program running in it (⌘W) asks first; a tab at a shell prompt closes right away.
    - Not brought back: terminals after a restart of the Mac (the host ends too; resume agent conversations with `claude --resume` or `codex resume`), the shell scrollback behind a full-screen program such as vim, bells and notifications while Plum was closed (hook states are kept).
 7. **Links**: ⌘-click an http(s) address in the terminal to open it.
@@ -121,7 +122,7 @@ Every command for moving between workspaces and tabs is in the Go menu. The keys
 
 Changed since before 0.1: ⌘1–9 picks a workspace, not a tab (as in cmux). Tabs are ⌃1–9.
 
-Also: new workspace ⌘N, new tab ⌘T (a terminal; the + after the tabs and the File menu also open Claude or Codex), close tab ⌘W, add project ⌘O, text size ⌘+ ⌘- ⌘0, show/hide sidebar ⌃⌘S or the sidebar button beside the window buttons (drag its edge to resize, double-click the edge for the default width); in the terminal, start/end of line ⌘← ⌘→, word left/right ⌥← ⌥→, delete line ⌘⌫.
+Also: new workspace ⌘N, new tab ⌘T (a terminal; the + after the tabs and the File menu also open Claude or Codex), close tab ⌘W, add project ⌘O, text size ⌘+ ⌘- ⌘0, sidebar width by dragging its edge (double-click the edge for the default width); in the terminal, start/end of line ⌘← ⌘→, word left/right ⌥← ⌥→, delete line ⌘⌫.
 
 In the terminal:
 - Find ⌘F (scrollback too, ASCII case ignored). Return or ⌘G goes up to older output, ⇧Return or ⇧⌘G back down, Esc closes. The match found is the selection, so ⌘C copies it.
@@ -145,6 +146,7 @@ In dialogs Return is the default button and Esc cancels; while a dialog is open,
 
 ### Settings (⌘,)
 
+- Language: the system language (default), 한국어 or English. A change asks to restart Plum; terminals carry on through it.
 - Font: picked from the installed fixed-width fonts, with a preview that mixes Korean and Latin text.
 - Font size: 8 to 40.
 - Workspace location: `~/plum/workspaces` by default. "Choose…" picks a folder; only full paths starting with `/` or `~` are taken.

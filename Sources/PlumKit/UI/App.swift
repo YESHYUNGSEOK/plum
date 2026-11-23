@@ -68,7 +68,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         model.onShowWindow = { [weak self] id in self?.showWorkspaceWindow(id) }
         for id in model.ownWindows { showWorkspaceWindow(id, front: false) }
         model.debugWindow = { [weak self] in self?.windowController.window }
-        model.debugToggleSidebar = { [weak self] in self?.windowController.toggleSidebar() }
         model.debugTraceDialogClose = { [weak self] done in self?.windowController.traceDialogClose(done) }
         model.debugNotificationStatus = { [weak self] in self?.notificationLog.joined(separator: "; ") ?? "" }
         model.debugInstallUpdate = { zip, signature, version in
@@ -100,7 +99,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         model.tabBecameVisible()
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    // The red button only hides the window: Plum stays in the Dock, keeps
+    // notifying, and its Dock icon brings the window back. ⌘Q quits.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showMainWindow()
+        return true
+    }
+
+    private func showMainWindow() {
+        if windowController.window?.isVisible != true { windowController.showWindow(nil) }
+    }
 
     /// The terminal host keeps every terminal; it gets their screens to keep too.
     func applicationWillTerminate(_ notification: Notification) {
@@ -109,8 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        guard needsQuitConfirmation else { return true }
-        askToQuit { confirmed in if confirmed { sender.close() } }
+        sender.orderOut(nil) // hidden, not closed: nothing ends
         return false
     }
 
@@ -246,6 +255,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             MainActor.assumeIsolated {
                 guard let id else { return }
                 NSApp.activate(ignoringOtherApps: true)
+                self.showMainWindow()
                 self.model.reveal(tab: id)
             }
         }
@@ -260,6 +270,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             MainActor.assumeIsolated {
                 if let tab {
                     NSApp.activate(ignoringOtherApps: true)
+                    self.showMainWindow()
                     self.model.reveal(tab: tab)
                 }
             }
@@ -340,7 +351,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             add(m, "글자 작게", #selector(smallerFont), "-")
             add(m, "기본 크기", #selector(resetFont), "0")
             m.addItem(.separator())
-            add(m, "사이드바 보기/가리기", #selector(toggleSidebar), "s", [.command, .control])
             add(m, "전체 화면", #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control], mine: false)
             add(m, "변경 보기", #selector(showChanges), "e", [.command, .shift])
             m.addItem(.separator())
@@ -489,7 +499,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         if let workspace = model.selectedWorkspace, !workspace.isArchived { model.sheet = .diff(workspace) }
     }
     @objc private func addProject() { AppActions.addProject(model) }
-    @objc private func toggleSidebar() { windowController.toggleSidebar() }
     @objc private func nextTab() { model.cycleTab(1) }
     @objc private func previousTab() { model.cycleTab(-1) }
     @objc private func selectTab(_ sender: NSMenuItem) {

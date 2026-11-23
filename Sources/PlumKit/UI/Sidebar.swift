@@ -110,8 +110,7 @@ struct SidebarView: View {
             .padding(.horizontal, 22)
             .frame(height: 46)
         }
-        // As wide as the window makes it (the user can drag its edge). While
-        // it folds away it keeps a minimum width and is clipped, not squeezed.
+        // As wide as the window makes it (the user can drag its edge).
         .frame(minWidth: 180, maxWidth: .infinity, alignment: .leading)
         // A new accent is a static value no view watches: draw everything again.
         .id(model.state.settings.accent)
@@ -847,6 +846,16 @@ private struct ProjectHeader: View {
         HStack(spacing: 0) {
             Button(action: toggle) {
                 HStack(spacing: 6) {
+                    // The repository's own icon, as Orca shows it.
+                    if let icon = model.projectIcons[project.id] {
+                        Image(nsImage: icon)
+                            .resizable()
+                            .interpolation(.high)
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 14, height: 14)
+                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                            .accessibilityHidden(true)
+                    }
                     Text(project.name)
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(hovering ? Theme.rowText : Theme.secondary)

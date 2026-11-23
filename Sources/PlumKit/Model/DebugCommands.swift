@@ -109,9 +109,6 @@ extension AppModel {
             guard size.count == 2, let window = debugWindow?() else { return "bad arguments" }
             window.setContentSize(NSSize(width: size[0], height: size[1]))
             return "ok"
-        case "toggle-sidebar":
-            debugToggleSidebar?()
-            return "ok"
         case "stats":
             let received = tabs.values.joined().reduce(0) { $0 + $1.session.bytesReceived }
             return "frames=\(TerminalView.framesDrawn) bytes=\(received)"

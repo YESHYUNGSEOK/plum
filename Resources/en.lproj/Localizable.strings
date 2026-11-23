@@ -121,7 +121,6 @@
 "블록" = "Block";
 "비교할 기준 브랜치를 찾지 못했습니다: %@" = "Couldn't find the base branch to compare with: %@";
 "빈 터미널" = "Plain Terminal";
-"사이드바 보기/가리기" = "Show/Hide Sidebar";
 "사이드바에서 고르기" = "Pick in Sidebar";
 "삭제" = "Delete";
 "상태를 저장하지 못했습니다: %@" = "Couldn't save the app's state: %@";
@@ -316,3 +315,8 @@
 "Plum이 macOS가 정한 임시 위치에서 실행 중입니다. 응용 프로그램 폴더로 옮긴 뒤 다시 여세요." = "Plum is running from a temporary place macOS chose. Move it to Applications and open it again.";
 "업데이트 파일을 내려받지 못했습니다." = "Couldn't download the update.";
 "Plum.app으로 실행할 때만 스스로 업데이트합니다." = "Plum updates itself only when run as Plum.app.";
+"언어" = "Language";
+"시스템 언어" = "System Language";
+"언어를 바꿨습니다" = "Language Changed";
+"Plum을 다시 시작하면 적용됩니다. 지금 다시 시작할까요? 터미널과 그 안의 프로그램은 그대로 이어집니다." = "It takes effect when Plum restarts. Restart now? Terminals and the programs in them carry on.";
+"다시 시작" = "Restart";

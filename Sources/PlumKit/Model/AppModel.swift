@@ -91,7 +91,8 @@ public final class AppModel {
     public private(set) var pending: [PendingWorkspace] = []
     public var errorMessage: String?
     public var sheet: AppSheet?
-    public var sidebarCollapsed = false
+    /// Each project's own icon from its repository (ProjectIcon), if it has one.
+    public private(set) var projectIcons: [UUID: NSImage] = [:]
     /// The sidebar has the keyboard: arrows move between workspaces.
     public var sidebarHasKeyboard = false
     /// The workspace whose name is being edited in place in the sidebar.
@@ -117,7 +118,6 @@ public final class AppModel {
     /// Installs a local zip and signature as an update would, then restarts.
     @ObservationIgnored var debugInstallUpdate: ((_ zip: URL, _ signature: URL, _ version: String) -> String)?
     @ObservationIgnored var debugWindow: (() -> NSWindow?)?
-    @ObservationIgnored var debugToggleSidebar: (() -> Void)?
     @ObservationIgnored var debugTraceDialogClose: ((@escaping (String) -> Void) -> Void)?
 
     public init(store: Store = Store()) {
@@ -175,6 +175,7 @@ public final class AppModel {
         watchTabs()
         for project in state.projects { for workspace in workspaces(in: project) { refreshChanges(workspace.id) } }
         refreshPullRequests()
+        state.projects.forEach(findIcon)
         let watch = Timer(timeInterval: 2, repeats: true) { [weak self] _ in MainActor.assumeIsolated { self?.watchTabs() } }
         watch.tolerance = 0.5
         RunLoop.main.add(watch, forMode: .common)
@@ -979,8 +980,24 @@ public final class AppModel {
         save()
         select(project.id)
         refreshPullRequests() // now, not at the next three-minute beat
+        findIcon(of: project)
         // Worktrees the repository already has show up with it.
         Task { await importWorktrees(of: project.id) }
+    }
+
+    /// Looks for the project's icon away from the main thread: a few file
+    /// reads, else its GitHub owner's picture.
+    private func findIcon(of project: Project) {
+        let (id, path) = (project.id, project.path)
+        Task {
+            var found = await Task.detached(priority: .utility) { ProjectIcon.find(in: path) }.value
+            if found == nil, let remote = try? await Task.detached(priority: .utility, operation: {
+                try Git.run(["remote", "get-url", "origin"], in: path)
+            }).value, let owner = ProjectIcon.githubOwner(ofRemote: remote) {
+                found = await ProjectIcon.ownerPicture(owner)
+            }
+            projectIcons[id] = found.flatMap(NSImage.init(data:))
+        }
     }
 
     /// Lists as workspaces the worktrees git already has for a project and

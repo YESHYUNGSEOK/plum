@@ -576,10 +576,30 @@ struct ProjectSettingsSheet: View {
     }
 }
 
+/// The UI language: the system's unless one is chosen in Settings. macOS
+/// reads AppleLanguages from the app's own defaults as it starts, so a
+/// change shows once Plum restarts.
+enum AppLanguage {
+    /// "" follows the system.
+    static var chosen: String {
+        let own = Bundle.main.bundleIdentifier.flatMap { UserDefaults.standard.persistentDomain(forName: $0) }
+        return (own?["AppleLanguages"] as? [String])?.first.flatMap { ["ko", "en"].contains($0) ? $0 : nil } ?? ""
+    }
+
+    static func choose(_ code: String) {
+        if code.isEmpty {
+            UserDefaults.standard.removeObject(forKey: "AppleLanguages")
+        } else {
+            UserDefaults.standard.set([code], forKey: "AppleLanguages")
+        }
+    }
+}
+
 struct SettingsSheet: View {
     let model: AppModel
     @State var settings: AppSettings
     let close: () -> Void
+    @State private var language = AppLanguage.chosen
     @State private var fonts: [String] = []
     @State private var problem: String?
 
@@ -614,6 +634,17 @@ struct SettingsSheet: View {
                     }
                 }
                 .frame(height: 32)
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("언어").font(.system(size: 12)).foregroundStyle(Theme.secondary)
+                Picker("언어", selection: $language) {
+                    Text("시스템 언어").tag("")
+                    // Each in its own language, so it can be found in either.
+                    Text(verbatim: "한국어").tag("ko")
+                    Text(verbatim: "English").tag("en")
+                }
+                .labelsHidden()
+                .frame(width: 200, height: 32)
             }
             SectionLabel("터미널")
             HStack(alignment: .bottom, spacing: 12) {
@@ -830,6 +861,15 @@ struct SettingsSheet: View {
         }
         model.update(settings)
         close()
+        guard language != AppLanguage.chosen else { return }
+        AppLanguage.choose(language)
+        Task {
+            let restart = await AppActions.ask(model, Confirmation(
+                title: String(localized: "언어를 바꿨습니다"),
+                summary: String(localized: "Plum을 다시 시작하면 적용됩니다. 지금 다시 시작할까요? 터미널과 그 안의 프로그램은 그대로 이어집니다."),
+                action: String(localized: "다시 시작"), destructive: false))
+            if restart { AppActions.relaunch(Bundle.main.bundleURL) }
+        }
     }
 }
 
