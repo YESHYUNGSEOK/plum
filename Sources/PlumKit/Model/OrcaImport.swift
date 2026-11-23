@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 /// A one-time import of what someone had in Orca: its repositories become
 /// projects and their worktrees workspaces. Read through Orca's own CLI
@@ -36,6 +36,73 @@ enum OrcaImport {
 
     enum Failure: Error, Equatable {
         case notInstalled, notRunning, unreadable
+    }
+
+    static let bundleID = "com.stablyai.orca"
+
+    /// Orca's CLI inside its app, if Orca is installed. Run by this path,
+    /// never looked up in PATH.
+    static func cli() -> URL? {
+        guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return nil }
+        let cli = app.appendingPathComponent("Contents/Resources/bin/orca")
+        return FileManager.default.isExecutableFile(atPath: cli.path) ? cli : nil
+    }
+
+    /// Orca's version, for saying which Orca's output couldn't be read.
+    static func version() -> String? {
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
+            .flatMap { Bundle(url: $0)?.infoDictionary?["CFBundleShortVersionString"] as? String }
+    }
+
+    /// What Orca has, from its CLI, with every path checked on disk: a
+    /// repository's folder must be a git repository (its root is kept), a
+    /// worktree's folder must exist (else it counts as missing).
+    static func load(cli: URL, timeout: TimeInterval = 15) async throws -> Catalog {
+        try await Task.detached {
+            var catalog = try parse(repos: run(cli, ["repo", "list", "--json"], timeout: timeout),
+                                    worktrees: run(cli, ["worktree", "list", "--json", "--limit", "10000"], timeout: timeout))
+            catalog.repos = catalog.repos.compactMap { repo in
+                guard FileManager.default.fileExists(atPath: repo.path), let root = Git.repositoryRoot(of: repo.path) else { return nil }
+                var repo = repo
+                repo.path = root
+                return repo
+            }
+            let kept = Set(catalog.repos.map(\.id))
+            var worktrees: [Worktree] = []
+            for worktree in catalog.worktrees where kept.contains(worktree.repoID) {
+                if FileManager.default.fileExists(atPath: worktree.path) { worktrees.append(worktree) } else { catalog.missing += 1 }
+            }
+            catalog.worktrees = worktrees
+            return catalog
+        }.value
+    }
+
+    /// The CLI's output whatever its exit status: Orca exits 1 with a JSON
+    /// reply when it isn't running. One that doesn't finish in `timeout`
+    /// is stopped and counts as unreadable.
+    private static func run(_ cli: URL, _ arguments: [String], timeout: TimeInterval) throws -> Data {
+        let process = Process()
+        process.executableURL = cli
+        process.arguments = arguments
+        let stdout = Pipe()
+        process.standardOutput = stdout
+        process.standardError = FileHandle.nullDevice
+        process.standardInput = FileHandle.nullDevice
+        let exited = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in exited.signal() }
+        do { try process.run() } catch { throw Failure.unreadable }
+        var output = Data()
+        let read = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            output = stdout.fileHandleForReading.readDataToEndOfFile()
+            read.signal()
+        }
+        let deadline = DispatchTime.now() + timeout
+        guard read.wait(timeout: deadline) == .success, exited.wait(timeout: deadline) == .success else {
+            process.terminate()
+            throw Failure.unreadable
+        }
+        return output
     }
 
     /// The two lists as the CLI prints them, filtered: no folder (non-git)
