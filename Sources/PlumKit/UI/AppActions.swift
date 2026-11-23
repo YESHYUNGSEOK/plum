@@ -8,10 +8,20 @@ enum AppActions {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
-        panel.message = String(localized: "git 저장소 폴더를 선택하세요")
+        panel.message = String(localized: "git 저장소나 폴더를 선택하세요")
         panel.prompt = String(localized: "추가")
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        model.addProject(at: url.path)
+        guard Git.repositoryRoot(of: url.path) == nil else { return model.addProject(at: url.path) }
+        // As Orca does: a folder that isn't a repository opens with terminals only.
+        Task {
+            guard await ask(model, Confirmation(
+                title: String(localized: "이 폴더는 git 저장소가 아닙니다"),
+                summary: String(localized: "터미널과 에이전트는 쓸 수 있지만 워크트리, 브랜치, 변경 보기, PR 같은 git 기능은 쓸 수 없습니다."),
+                sections: [.init(title: String(localized: "폴더"), lines: [(url.path as NSString).abbreviatingWithTildeInPath])],
+                action: String(localized: "폴더로 열기"), destructive: false))
+            else { return }
+            model.addProject(at: url.path, asFolder: true)
+        }
     }
 
     /// Closes a tab, asking first if a program is running in it.
@@ -48,7 +58,9 @@ enum AppActions {
             let openTabs = model.workspaces(in: project).reduce(0) { $0 + (model.tabs[$1.id]?.count ?? 0) }
             guard await ask(model, Confirmation(
                 title: String(localized: "‘\(project.name)’을 목록에서 제거할까요?"),
-                summary: String(localized: "Plum의 기록만 지웁니다. 저장소와 워크트리 폴더는 그대로 남습니다."),
+                summary: project.isFolder
+                    ? String(localized: "Plum의 목록에서만 지웁니다. 폴더는 그대로 남습니다.")
+                    : String(localized: "Plum의 기록만 지웁니다. 저장소와 워크트리 폴더는 그대로 남습니다."),
                 note: terminalsNote(openTabs), action: String(localized: "제거"), destructive: false))
             else { return }
             model.removeProject(project.id)
@@ -73,6 +85,7 @@ enum AppActions {
     }
 
     static func delete(_ model: AppModel, _ workspace: Workspace) {
+        if model.project(workspace.projectID)?.isFolder == true { return forget(model, workspace) }
         Task {
             // As in Orca, a branch that isn't merged is kept, so only local changes can be lost.
             let check = await model.removalCheck(workspace.id, deletingBranch: false)
@@ -92,6 +105,20 @@ enum AppActions {
             var kept: [Git.Branch] = []
             await run(model) { kept = try await model.delete(workspace.id, force: !check.uncommitted.isEmpty, nested: check.nested) }
             if let project = model.project(workspace.projectID) { await offerToDelete(kept, in: project, model) }
+        }
+    }
+
+    /// A folder project's workspace leaves only Plum's list: the folder is the project's.
+    private static func forget(_ model: AppModel, _ workspace: Workspace) {
+        Task {
+            let openTabs = model.tabs[workspace.id]?.count ?? 0
+            guard await ask(model, Confirmation(
+                title: String(localized: "‘\(workspace.name)’을 목록에서 제거할까요?"),
+                summary: String(localized: "Plum의 목록에서만 지웁니다. 폴더는 그대로 남습니다."),
+                sections: running(model, workspace.id), note: terminalsNote(openTabs),
+                action: String(localized: "제거"), destructive: false))
+            else { return }
+            await run(model) { try await model.delete(workspace.id, force: false) }
         }
     }
 

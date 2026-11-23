@@ -3,8 +3,12 @@ import Foundation
 public struct Project: Codable, Identifiable, Equatable {
     public var id = UUID()
     public var name: String
-    /// The repository's main checkout.
+    /// The repository's main checkout, or the folder of a folder project.
     public var path: String
+    /// True for a folder that isn't a git repository, opened as in Orca:
+    /// terminals only, no git. Optional so older state files still load.
+    public var folder: Bool?
+    public var isFolder: Bool { folder == true }
     /// Ref new branches start from. Empty = the remote's default branch.
     public var baseBranch = ""
     /// Untracked files to copy into each new worktree, as globs relative to `path`.

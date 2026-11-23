@@ -320,6 +320,7 @@ struct NewWorkspaceSheet: View {
     private var chosenBranch: String { useExisting ? existingBranch : branch }
 
     private var location: String {
+        if project.isFolder { return (project.path as NSString).abbreviatingWithTildeInPath } // its workspaces share it
         let root = model.state.settings.workspaceRoot
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         let path = trimmed.isEmpty ? nil : WorkspaceNaming.worktreePath(root: root, project: project.name, workspace: trimmed)
@@ -327,7 +328,7 @@ struct NewWorkspaceSheet: View {
     }
 
     private var canCreate: Bool {
-        !checking && !name.trimmingCharacters(in: .whitespaces).isEmpty && !chosenBranch.isEmpty
+        !checking && !name.trimmingCharacters(in: .whitespaces).isEmpty && (project.isFolder || !chosenBranch.isEmpty)
     }
 
     var body: some View {
@@ -356,31 +357,33 @@ struct NewWorkspaceSheet: View {
             Rectangle().fill(Theme.divider).frame(height: 1)
 
             VStack(spacing: 2) {
-                OptionRow(symbol: "arrow.triangle.branch", label: useExisting ? "기존 브랜치" : "새 브랜치", focused: focus == .branch) {
-                    if useExisting {
-                        Picker("체크아웃할 브랜치", selection: $existingBranch) {
-                            ForEach(branches, id: \.self) { Text($0).tag($0) }
+                if !project.isFolder { // no git: no branch, no start point
+                    OptionRow(symbol: "arrow.triangle.branch", label: useExisting ? "기존 브랜치" : "새 브랜치", focused: focus == .branch) {
+                        if useExisting {
+                            Picker("체크아웃할 브랜치", selection: $existingBranch) {
+                                ForEach(branches, id: \.self) { Text($0).tag($0) }
+                            }
+                            .labelsHidden()
+                        } else {
+                            TextField("브랜치 이름", text: Binding(get: { branch }, set: { branch = $0; branchEdited = true }))
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 12.5, design: .monospaced))
+                                .foregroundStyle(Theme.text)
+                                .focused($focus, equals: .branch)
                         }
-                        .labelsHidden()
-                    } else {
-                        TextField("브랜치 이름", text: Binding(get: { branch }, set: { branch = $0; branchEdited = true }))
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 12.5, design: .monospaced))
-                            .foregroundStyle(Theme.text)
-                            .focused($focus, equals: .branch)
+                        Button(LocalizedStringKey(useExisting ? "새 브랜치로" : "기존 브랜치로")) { useExisting.toggle() }
+                            .buttonStyle(PlumButtonStyle(kind: .ghost, height: 24))
                     }
-                    Button(LocalizedStringKey(useExisting ? "새 브랜치로" : "기존 브랜치로")) { useExisting.toggle() }
-                        .buttonStyle(PlumButtonStyle(kind: .ghost, height: 24))
-                }
-                if !useExisting {
-                    OptionRow(symbol: "arrow.right", label: "시작 지점", focused: focus == .base) {
-                        TextField(
-                            "시작 지점", text: $base,
-                            prompt: (defaultBase.isEmpty ? Text("기본 브랜치") : Text(verbatim: defaultBase)).foregroundColor(Theme.tertiary))
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 12.5, design: .monospaced))
-                            .foregroundStyle(Theme.text)
-                            .focused($focus, equals: .base)
+                    if !useExisting {
+                        OptionRow(symbol: "arrow.right", label: "시작 지점", focused: focus == .base) {
+                            TextField(
+                                "시작 지점", text: $base,
+                                prompt: (defaultBase.isEmpty ? Text("기본 브랜치") : Text(verbatim: defaultBase)).foregroundColor(Theme.tertiary))
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 12.5, design: .monospaced))
+                                .foregroundStyle(Theme.text)
+                                .focused($focus, equals: .base)
+                        }
                     }
                 }
                 OptionRow(symbol: "sparkles", label: "에이전트", focused: false) {
@@ -434,6 +437,7 @@ struct NewWorkspaceSheet: View {
         .onExitCommand(perform: close)
         .task {
             focus = .name
+            guard !project.isFolder else { return } // git would answer for a repository above it
             let path = project.path
             let configured = project.baseBranch
             let loaded = await Task.detached { (Git.branches(in: path), Git.defaultBase(in: path)) }.value
@@ -526,20 +530,24 @@ struct ProjectSettingsSheet: View {
                     .textSelection(.enabled)
                     .help(project.path)
             }
-            PlumField(label: "시작 지점", text: $project.baseBranch, prompt: "원격 기본 브랜치", mono: true)
+            if !project.isFolder { // a folder project's workspaces have no branch and no worktree to copy into
+                PlumField(label: "시작 지점", text: $project.baseBranch, prompt: "원격 기본 브랜치", mono: true)
+            }
             SectionLabel("워크스페이스를 만들 때")
-            VStack(alignment: .leading, spacing: 6) {
-                Text("복사할 파일 (한 줄에 하나)").font(.system(size: 12)).foregroundStyle(Theme.secondary).accessibilityHidden(true)
-                TextEditor(text: $patterns)
-                    .font(.system(size: 12.5, design: .monospaced))
-                    .scrollContentBackground(.hidden)
-                    .focused($patternsFocused)
-                    .padding(.vertical, 6)
-                    .fieldWell(focused: patternsFocused, height: 64)
-                    .accessibilityLabel("복사할 파일 패턴")
-                Text("기본 체크아웃에서 새 워크트리로 복사합니다. 예: .env*")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Theme.tertiary)
+            if !project.isFolder {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("복사할 파일 (한 줄에 하나)").font(.system(size: 12)).foregroundStyle(Theme.secondary).accessibilityHidden(true)
+                    TextEditor(text: $patterns)
+                        .font(.system(size: 12.5, design: .monospaced))
+                        .scrollContentBackground(.hidden)
+                        .focused($patternsFocused)
+                        .padding(.vertical, 6)
+                        .fieldWell(focused: patternsFocused, height: 64)
+                        .accessibilityLabel("복사할 파일 패턴")
+                    Text("기본 체크아웃에서 새 워크트리로 복사합니다. 예: .env*")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Theme.tertiary)
+                }
             }
             PlumField(
                 label: "준비 명령", text: $project.setupCommand, prompt: "예: pnpm install", mono: true,

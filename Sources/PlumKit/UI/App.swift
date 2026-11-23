@@ -502,7 +502,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     @objc private func paneUp() { model.focusPane(dx: 0, dy: -1) }
     @objc private func paneDown() { model.focusPane(dx: 0, dy: 1) }
     @objc private func showChanges() {
-        if let workspace = model.selectedWorkspace, !workspace.isArchived { model.sheet = .diff(workspace) }
+        if let workspace = model.selectedWorkspace, !workspace.isArchived, model.project(workspace.projectID)?.isFolder == false {
+            model.sheet = .diff(workspace)
+        }
     }
     @objc private func addProject() { AppActions.addProject(model) }
     @objc private func importFromOrca() { Task { await AppActions.importFromOrca(model, quietly: false) } }

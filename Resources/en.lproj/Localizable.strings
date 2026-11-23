@@ -26,7 +26,6 @@
 "Plum의 기록만 지웁니다. 저장소와 워크트리 폴더는 그대로 남습니다." = "Only Plum's records are removed. The repository and the worktree folders stay as they are.";
 "git %@ 실패" = "git %@ failed";
 "git 저장소 폴더를 등록하면 워크스페이스마다 워크트리와 터미널이 만들어집니다." = "Add a git repository folder, and every workspace gets its own worktree and terminal.";
-"git 저장소 폴더를 선택하세요" = "Choose a git repository folder";
 "git 저장소가 아닙니다: %@" = "Not a git repository: %@";
 "git을 실행할 수 없습니다: %@" = "Couldn't run git: %@";
 "zsh 연동: 명령 사이를 ⌘↑ ⌘↓로 이동 (새 탭부터)" = "zsh integration: ⌘↑ ⌘↓ jump between commands (new tabs)";
@@ -339,3 +338,9 @@
 "브랜치 삭제" = "Delete Branch";
 "브랜치 %@가 다른 워크트리에 체크아웃되어 있습니다." = "The branch %@ is checked out in another worktree.";
 "브랜치 %@가 그 사이 바뀌었습니다. 확인한 뒤 지우세요." = "The branch %@ changed meanwhile. Look at it before deleting it.";
+"git 저장소나 폴더를 선택하세요" = "Choose a git repository or a folder";
+"이 폴더는 git 저장소가 아닙니다" = "This Folder Isn't a Git Repository";
+"터미널과 에이전트는 쓸 수 있지만 워크트리, 브랜치, 변경 보기, PR 같은 git 기능은 쓸 수 없습니다." = "Terminals and agents work, but git features such as worktrees, branches, Show Changes and pull requests won't be available.";
+"폴더" = "Folder";
+"폴더로 열기" = "Open as Folder";
+"Plum의 목록에서만 지웁니다. 폴더는 그대로 남습니다." = "Only Plum's list changes. The folder stays as it is.";

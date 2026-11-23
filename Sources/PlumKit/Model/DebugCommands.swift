@@ -29,8 +29,8 @@ extension AppModel {
         switch parts.first ?? "" {
         case "state":
             return debugState()
-        case "add-project":
-            addProject(at: argument)
+        case "add-project": // path[|folder]
+            addProject(at: fields[0], asFolder: fields.count > 1 && fields[1] == "folder")
             return errorMessage ?? "ok"
         case "set-project": // name|copy patterns (comma separated)|setup
             guard fields.count >= 3, var project = state.projects.first(where: { $0.name == fields[0] }) else { return "bad arguments" }

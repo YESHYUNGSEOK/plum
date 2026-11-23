@@ -354,13 +354,17 @@ private struct ProjectSection: View {
         var items: [DropdownItem] = [
             .command(String(localized: "새 워크스페이스…"), symbol: "plus") { model.sheet = .newWorkspace(project) },
             .command(String(localized: "프로젝트 설정…"), symbol: "slider.horizontal.3") { model.sheet = .projectSettings(project) },
-            .command(String(localized: "기존 워크트리 가져오기"), symbol: "square.and.arrow.down") {
+        ]
+        if !project.isFolder {
+            items.append(.command(String(localized: "기존 워크트리 가져오기"), symbol: "square.and.arrow.down") {
                 Task {
                     if await model.importWorktrees(of: project.id) == 0 {
                         model.errorMessage = String(localized: "가져올 워크트리가 없습니다. 이 저장소의 워크트리는 모두 목록에 있습니다.")
                     }
                 }
-            },
+            })
+        }
+        items += [
             collapsed
                 ? .command(String(localized: "펼치기"), symbol: "chevron.down") { model.setCollapsed(project.id, false) }
                 : .command(String(localized: "접기"), symbol: "chevron.right") { model.setCollapsed(project.id, true) },
@@ -392,7 +396,11 @@ private struct ProjectSection: View {
             items.append(.command(String(localized: "탭 모두 닫기"), symbol: "xmark.square") { AppActions.closeTabs(model, open.map(\.id)) })
         }
         items.append(.separator())
-        if model.isMain(workspace) {
+        if model.isMain(workspace), project.isFolder {
+            items.append(.command(String(localized: "Plum에서 프로젝트 제거"), symbol: "minus.circle", destructive: true) {
+                AppActions.removeProject(model, project)
+            })
+        } else if model.isMain(workspace) {
             // The project's own checkout is the repository itself.
             items += [
                 .command(String(localized: "작업 트리 삭제"), symbol: "trash", enabled: false) {},
@@ -401,6 +409,8 @@ private struct ProjectSection: View {
                     AppActions.removeProject(model, project)
                 },
             ]
+        } else if project.isFolder { // only an entry in Plum: the folder is the project's
+            items.append(.command(String(localized: "목록에서 제거"), symbol: "minus.circle", destructive: true) { AppActions.delete(model, workspace) })
         } else {
             items.append(workspace.isArchived
                 ? .command(String(localized: "복원"), symbol: "arrow.uturn.backward") { AppActions.restore(model, workspace) }
@@ -417,14 +427,16 @@ private struct ProjectSection: View {
         }
         let pullRequest = model.pullRequest(of: workspace)
         if !workspace.isArchived {
-            items.append(.command(String(localized: "변경 보기"), symbol: "plus.forwardslash.minus") { model.sheet = .diff(workspace) })
+            if !project.isFolder {
+                items.append(.command(String(localized: "변경 보기"), symbol: "plus.forwardslash.minus") { model.sheet = .diff(workspace) })
+            }
             items.append(.command(String(localized: "새 창에서 열기"), symbol: "macwindow.badge.plus") { model.openInOwnWindow(workspace.id) })
         }
         if let pullRequest {
             items.append(.command(String(localized: "PR #\(pullRequest.number) 열기"), symbol: "arrow.triangle.pull") {
                 NSWorkspace.shared.open(pullRequest.url)
             })
-        } else if !workspace.isArchived, !model.isMain(workspace) {
+        } else if !workspace.isArchived, !model.isMain(workspace), !project.isFolder {
             items.append(.command(String(localized: "PR 만들기"), symbol: "arrow.triangle.pull") { model.createPullRequest(workspace.id) })
         }
         var copies: [DropdownItem] = [.command(String(localized: "경로"), symbol: "folder") { copy(workspace.path) }]

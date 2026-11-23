@@ -79,7 +79,7 @@ Facts checked in the source (tag `vt-1.0.1`):
 
 ### 6.1 Projects
 
-- Add one by choosing a local git repository folder. A folder that isn't a git repository is refused.
+- Add one by choosing a local git repository folder. A folder that isn't a git repository is refused. **[Decision, 2026-11-23]** No longer refused: as in Orca 1.4.271, after "Open as Folder" it becomes a folder project (feedback from a colleague who keeps every repository in one folder and runs agents there). Its workspaces are named sets of tabs in that same folder, with no worktree or branch; deleting one removes only Plum's record. Git and gh are never run for it (git would answer for a repository above the folder), and the git-only parts are hidden: changes, Show Changes, pull requests, archive, Import Existing Worktrees, the base branch and files to copy.
 - Per-project settings: default base branch, setup (6.3).
 - The project's original checkout (the main folder) also shows in the sidebar as the "main" workspace and can open terminals. The main workspace can't be archived or deleted. **[Proposal]**
 - Removing a project only clears the app's record. The repository and worktrees are left alone. **[Proposal]**

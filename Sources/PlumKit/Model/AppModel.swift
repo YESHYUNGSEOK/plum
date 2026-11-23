@@ -224,7 +224,8 @@ public final class AppModel {
 
     /// Recounts a workspace's uncommitted changes in the background.
     func refreshChanges(_ id: UUID) {
-        guard let workspace = workspace(id), !workspace.isArchived, folderExists(workspace) else { return }
+        guard let workspace = workspace(id), !workspace.isArchived, folderExists(workspace),
+              project(workspace.projectID)?.isFolder == false else { return }
         // Asked while counting: count once more after, or files changed
         // since the count began would go unseen until the next one.
         if countingChanges[id] != nil { return countingChanges[id] = true }
@@ -240,7 +241,7 @@ public final class AppModel {
 
     /// Asks GitHub for each project's pull requests in the background.
     func refreshPullRequests() {
-        for project in state.projects where fetchingPullRequests.insert(project.id).inserted {
+        for project in state.projects where !project.isFolder && fetchingPullRequests.insert(project.id).inserted {
             let path = project.path
             Task {
                 let found = await Task.detached(priority: .utility) { GitHub.pullRequests(in: path) }.value
@@ -962,21 +963,27 @@ public final class AppModel {
 
     // MARK: Projects and settings
 
-    public func addProject(at path: String) {
-        guard let root = Git.repositoryRoot(of: path) else {
+    /// Adds a git repository, or with `asFolder` a folder that isn't one
+    /// (as Orca's "Open as Folder"). A folder inside a repository is that repository.
+    public func addProject(at path: String, asFolder: Bool = false) {
+        let root = Git.repositoryRoot(of: path)
+        guard root != nil || asFolder else {
             errorMessage = String(localized: "git 저장소가 아닙니다: \(path)")
             return
         }
-        if let existing = state.projects.first(where: { WorkspaceService.samePath($0.path, root) }) {
+        let location = root ?? WorkspaceService.canonical(path)
+        if let existing = state.projects.first(where: { WorkspaceService.samePath($0.path, location) }) {
             select(existing.id)
             return
         }
-        let project = Project(name: uniqueProjectName((root as NSString).lastPathComponent), path: root)
+        var project = Project(name: uniqueProjectName((location as NSString).lastPathComponent), path: location)
+        if root == nil { project.folder = true }
         state.projects.append(project)
         save()
         select(project.id)
-        refreshPullRequests() // now, not at the next three-minute beat
         findIcon(of: project)
+        guard !project.isFolder else { return }
+        refreshPullRequests() // now, not at the next three-minute beat
         // Worktrees the repository already has show up with it.
         Task { await importWorktrees(of: project.id) }
     }
@@ -984,10 +991,10 @@ public final class AppModel {
     /// Looks for the project's icon away from the main thread: a few file
     /// reads, else its GitHub owner's picture.
     private func findIcon(of project: Project) {
-        let (id, path) = (project.id, project.path)
+        let (id, path, isFolder) = (project.id, project.path, project.isFolder)
         Task {
             var found = await Task.detached(priority: .utility) { ProjectIcon.find(in: path) }.value
-            if found == nil, let remote = try? await Task.detached(priority: .utility, operation: {
+            if found == nil, !isFolder, let remote = try? await Task.detached(priority: .utility, operation: {
                 try Git.run(["remote", "get-url", "origin"], in: path)
             }).value, let owner = ProjectIcon.githubOwner(ofRemote: remote) {
                 found = await ProjectIcon.ownerPicture(owner)
@@ -1201,6 +1208,11 @@ public final class AppModel {
         if pending.contains(where: { $0.projectID == projectID && $0.name == trimmed }) {
             return String(localized: "같은 이름의 워크스페이스를 만드는 중입니다: \(trimmed)")
         }
+        if project.isFolder { // the same folder for all of them: only the name must differ
+            if trimmed.isEmpty { return String(localized: "워크스페이스 이름을 입력하세요.") }
+            return state.workspaces.contains { $0.projectID == projectID && $0.name == trimmed }
+                ? String(localized: "같은 이름의 워크스페이스가 이미 있습니다: \(trimmed)") : nil
+        }
         let root = state.settings.workspaceRoot
         let existing = state.workspaces
         return await Task.detached {
@@ -1217,9 +1229,21 @@ public final class AppModel {
         projectID: UUID, name: String, branch: String, choice: WorkspaceService.BranchChoice, program: TabProgram
     ) async throws {
         guard let project = project(projectID) else { return }
+        let setup = firstCommand(for: project, program: program)
+        if project.isFolder {
+            if let problem = await problemCreatingWorkspace(projectID: projectID, name: name, branch: branch, choice: choice) {
+                throw GitError(message: problem)
+            }
+            let workspace = Workspace(projectID: projectID, name: name.trimmingCharacters(in: .whitespaces), branch: "", path: project.path)
+            state.workspaces.append(workspace)
+            save()
+            selection = workspace.id
+            prepare(program, in: project.path)
+            openTab(in: workspace.id, command: setup)
+            return
+        }
         let root = state.settings.workspaceRoot
         let existing = state.workspaces
-        let setup = firstCommand(for: project, program: program)
         var steps: [PendingWorkspace.Step] = []
         if case .new = choice { steps.append(.init(kind: .fetch, detail: "git fetch")) }
         steps.append(.init(kind: .worktree, detail: branch))
@@ -1267,7 +1291,7 @@ public final class AppModel {
     /// Removes the worktree folder but keeps the branch and the record.
     public func archive(_ id: UUID, force: Bool) async throws {
         guard let workspace = state.workspaces.first(where: { $0.id == id }), !workspace.isArchived,
-              let project = project(workspace.projectID) else { return }
+              let project = project(workspace.projectID), !project.isFolder else { return }
         try await removeWorktree(of: workspace, project: project, force: force)
         if let index = state.workspaces.firstIndex(where: { $0.id == id }) { state.workspaces[index].isArchived = true }
         save()
@@ -1280,6 +1304,13 @@ public final class AppModel {
     @discardableResult
     public func delete(_ id: UUID, force: Bool, nested: [Git.Worktree] = []) async throws -> [Git.Branch] {
         guard let workspace = state.workspaces.first(where: { $0.id == id }), let project = project(workspace.projectID) else { return [] }
+        if project.isFolder { // only Plum's record: the folder is the project's, shared by its workspaces
+            closeAllTabs(in: id)
+            state.workspaces.removeAll { $0.id == id }
+            save()
+            if selection == id { select(project.id) }
+            return []
+        }
         busy.insert(id)
         defer { busy.remove(id) }
         let kept = try await Task.detached {
