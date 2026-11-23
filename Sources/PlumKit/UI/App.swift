@@ -84,6 +84,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         // The Dock badge needs no permission, unlike notifications.
         updateBadge()
         model.start(debug: debug)
+        // Someone coming from Orca: offered once what they had there.
+        if !debug, model.state.projects.isEmpty, !UserDefaults.standard.bool(forKey: "offeredOrcaImport"), OrcaImport.cli() != nil {
+            UserDefaults.standard.set(true, forKey: "offeredOrcaImport")
+            Task { await AppActions.importFromOrca(model, quietly: true) }
+        }
         if debug {
             // Scripted runs must not grab the keyboard from whoever is
             // working, nor cover what they are looking at.
@@ -324,6 +329,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             add(m, "새 Claude 탭", #selector(newClaudeTab))
             add(m, "새 Codex 탭", #selector(newCodexTab))
             add(m, "프로젝트 추가…", #selector(addProject), "o")
+            add(m, "Orca에서 가져오기…", #selector(importFromOrca))
             m.addItem(.separator())
             add(m, "탭 닫기", #selector(closeTab), "w")
             add(m, "닫은 탭 다시 열기", #selector(reopenClosedTab), "t", [.command, .shift])
@@ -499,6 +505,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         if let workspace = model.selectedWorkspace, !workspace.isArchived { model.sheet = .diff(workspace) }
     }
     @objc private func addProject() { AppActions.addProject(model) }
+    @objc private func importFromOrca() { Task { await AppActions.importFromOrca(model, quietly: false) } }
     @objc private func nextTab() { model.cycleTab(1) }
     @objc private func previousTab() { model.cycleTab(-1) }
     @objc private func selectTab(_ sender: NSMenuItem) {

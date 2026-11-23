@@ -144,6 +144,19 @@ extension AppModel {
         case "notice": // shows a notice toast (not an error); empty clears it
             notice = argument.isEmpty ? nil : argument
             return "ok"
+        case "import-orca": // imports from Orca without asking (its CLI, read-only); the outcome lands in "result"
+            guard let cli = OrcaImport.cli() else { return "not installed" }
+            debugResult = "pending"
+            Task {
+                do {
+                    let catalog = try await OrcaImport.load(cli: cli)
+                    let result = await importFromOrca(catalog)
+                    debugResult = "projects=\(result.projects) workspaces=\(result.workspaces) detached=\(catalog.detached) missing=\(catalog.missing)"
+                } catch {
+                    debugResult = "failed: \(error)"
+                }
+            }
+            return "started"
         case "update-local": // zip|signature file|version: installs it as an update would, and restarts
             guard fields.count == 3, let install = debugInstallUpdate else { return "bad arguments" }
             return install(URL(fileURLWithPath: fields[0]), URL(fileURLWithPath: fields[1]), fields[2])

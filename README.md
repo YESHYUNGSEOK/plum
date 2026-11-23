@@ -83,6 +83,7 @@ To ship a build macOS opens directly, `release.sh` signs with the hardened runti
 ## Using it
 
 1. **Add a project** (⌘O): choose a git repository folder. The sidebar shows the project and `main`, its original checkout.
+   - Coming from Orca: File → Import from Orca… (Orca must be running) adds the repositories and worktrees you had there, with Orca's names. It only reads Orca's list; nothing on disk changes. A first launch with no projects offers it once.
 2. **Project settings** (the ⋯ next to a project name): what happens when a workspace is made.
    - Files to copy: files outside git (one glob per line, e.g. `.env*`) copied from the main checkout into each new worktree.
    - Setup command, e.g. `pnpm install`.

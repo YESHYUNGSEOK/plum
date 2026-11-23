@@ -320,3 +320,14 @@
 "언어를 바꿨습니다" = "Language Changed";
 "Plum을 다시 시작하면 적용됩니다. 지금 다시 시작할까요? 터미널과 그 안의 프로그램은 그대로 이어집니다." = "It takes effect when Plum restarts. Restart now? Terminals and the programs in them carry on.";
 "다시 시작" = "Restart";
+"Orca에서 가져오기…" = "Import from Orca…";
+"Orca가 설치되어 있지 않습니다." = "Orca isn't installed.";
+"Orca를 켠 뒤 다시 시도해 주세요." = "Open Orca, then try again.";
+"Orca의 출력을 읽지 못해 가져오지 않았습니다 (Orca %@)." = "Couldn't read Orca's output, so nothing was imported (Orca %@).";
+"Orca에 가져올 저장소가 없습니다." = "Orca has no repositories to import.";
+"Orca에서 가져올까요?" = "Import from Orca?";
+"저장소 %lld개와 워크트리 %lld개를 Plum 목록에 더합니다. 디스크의 파일은 바뀌지 않습니다." = "Adds %lld repositories and %lld worktrees to Plum's list. Nothing on disk changes.";
+"저장소" = "Repositories";
+"가져오기" = "Import";
+"저장소 %lld개와 워크트리 %lld개를 가져왔습니다." = "Imported %lld repositories and %lld worktrees.";
+" 브랜치가 없는 워크트리 %lld개와 폴더가 없는 워크트리 %lld개는 건너뛰었습니다." = " Skipped %lld worktrees without a branch and %lld whose folder is gone.";

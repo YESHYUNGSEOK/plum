@@ -148,6 +148,42 @@ enum AppActions {
         }
     }
 
+    /// Brings in what the user had in Orca, once (OrcaImport): asks, then
+    /// adds. `quietly` (the first-launch offer) says nothing unless there
+    /// is something to bring in.
+    static func importFromOrca(_ model: AppModel, quietly: Bool) async {
+        guard let cli = OrcaImport.cli() else {
+            if !quietly { model.errorMessage = String(localized: "Orca가 설치되어 있지 않습니다.") }
+            return
+        }
+        let catalog: OrcaImport.Catalog
+        do {
+            catalog = try await OrcaImport.load(cli: cli)
+        } catch OrcaImport.Failure.notRunning {
+            if !quietly { model.errorMessage = String(localized: "Orca를 켠 뒤 다시 시도해 주세요.") }
+            return
+        } catch {
+            if !quietly { model.errorMessage = String(localized: "Orca의 출력을 읽지 못해 가져오지 않았습니다 (Orca \(OrcaImport.version() ?? "?")).") }
+            return
+        }
+        guard !catalog.repos.isEmpty else {
+            if !quietly { model.notice = String(localized: "Orca에 가져올 저장소가 없습니다.") }
+            return
+        }
+        // Don't take over a dialog that is already open.
+        guard model.sheet == nil, await ask(model, Confirmation(
+            title: String(localized: "Orca에서 가져올까요?"),
+            summary: String(localized: "저장소 \(catalog.repos.count)개와 워크트리 \(catalog.worktrees.count)개를 Plum 목록에 더합니다. 디스크의 파일은 바뀌지 않습니다."),
+            sections: [.init(title: String(localized: "저장소"), lines: catalog.repos.map(\.name))],
+            action: String(localized: "가져오기"), destructive: false)) else { return }
+        let result = await model.importFromOrca(catalog)
+        var message = String(localized: "저장소 \(result.projects)개와 워크트리 \(result.workspaces)개를 가져왔습니다.")
+        if catalog.detached + catalog.missing > 0 {
+            message += String(localized: " 브랜치가 없는 워크트리 \(catalog.detached)개와 폴더가 없는 워크트리 \(catalog.missing)개는 건너뛰었습니다.")
+        }
+        model.notice = message
+    }
+
     private static func offerPage(_ model: AppModel, _ release: Updates.Release, title: String, summary: String) async {
         let open = await ask(model, Confirmation(
             title: title, summary: summary + " " + String(localized: "내려받기 페이지를 열까요?"),
