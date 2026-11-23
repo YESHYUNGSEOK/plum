@@ -129,19 +129,19 @@ enum AppActions {
                 guard !installing else { return }
                 installing = true
                 defer { installing = false }
-                model.errorMessage = String(localized: "업데이트를 내려받는 중…")
+                model.notice = String(localized: "업데이트를 내려받는 중…")
                 do {
                     let app = try await Updates.install(release)
                     // Still true if the quit is cancelled.
-                    model.errorMessage = String(localized: "업데이트를 설치했습니다. Plum을 다시 시작하면 적용됩니다.")
+                    model.notice = String(localized: "업데이트를 설치했습니다. Plum을 다시 시작하면 적용됩니다.")
                     relaunch(app)
                 } catch {
-                    model.errorMessage = nil
+                    model.notice = nil
                     await offerPage(model, release, title: String(localized: "업데이트를 설치하지 못했습니다"),
                                     summary: error.localizedDescription)
                 }
             } else if !quietly {
-                model.errorMessage = String(localized: "최신 버전입니다 (\(Updates.current)).")
+                model.notice = String(localized: "최신 버전입니다 (\(Updates.current)).")
             }
         } catch {
             if !quietly { model.errorMessage = String(localized: "업데이트를 확인하지 못했습니다: \(error.localizedDescription)") }
@@ -177,7 +177,10 @@ enum AppActions {
         posix_spawnattr_init(&attributes)
         posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSID | POSIX_SPAWN_CLOEXEC_DEFAULT))
         defer { posix_spawnattr_destroy(&attributes) }
-        let script = "while kill -0 \(getpid()) 2>/dev/null; do sleep 0.2; done; exec /usr/bin/open \"$@\""
+        // -n: a new copy, always. Without it LaunchServices, which can still
+        // count the copy that just quit as running, sends that copy "reopen"
+        // instead, and nothing opens.
+        let script = "while kill -0 \(getpid()) 2>/dev/null; do sleep 0.2; done; exec /usr/bin/open -n \"$@\""
         // A copy started with settings of its own (a test instance's state
         // folder) comes back with them; one started normally has none.
         let carried = ProcessInfo.processInfo.environment

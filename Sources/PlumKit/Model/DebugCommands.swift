@@ -141,6 +141,9 @@ extension AppModel {
         case "error": // shows the error toast; empty clears it
             errorMessage = argument.isEmpty ? nil : argument
             return "ok"
+        case "notice": // shows a notice toast (not an error); empty clears it
+            notice = argument.isEmpty ? nil : argument
+            return "ok"
         case "update-local": // zip|signature file|version: installs it as an update would, and restarts
             guard fields.count == 3, let install = debugInstallUpdate else { return "bad arguments" }
             return install(URL(fileURLWithPath: fields[0]), URL(fileURLWithPath: fields[1]), fields[2])
@@ -402,6 +405,7 @@ extension AppModel {
             "window": debugWindowNumber?() ?? 0,
             "result": debugResult,
             "error": errorMessage ?? "",
+            "notice": notice ?? "",
             "selection": selectedWorkspace?.name ?? "",
             "sheet": sheet?.id ?? "",
             "selectionProject": selectedWorkspace.flatMap { project($0.projectID)?.name } ?? "",

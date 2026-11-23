@@ -90,6 +90,9 @@ public final class AppModel {
     public private(set) var busy: Set<UUID> = []
     public private(set) var pending: [PendingWorkspace] = []
     public var errorMessage: String?
+    /// How something is going (an update downloading): the same toast as
+    /// `errorMessage`, not marked as a problem.
+    public var notice: String?
     public var sheet: AppSheet?
     /// Each project's own icon from its repository (ProjectIcon), if it has one.
     public private(set) var projectIcons: [UUID: NSImage] = [:]

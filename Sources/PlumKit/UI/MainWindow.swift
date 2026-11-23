@@ -752,17 +752,21 @@ final class TerminalAreaController: NSViewController {
     /// Slides the toast in when an error arrives and fades it out when it is
     /// dismissed. Core Animation runs both, off the main thread's clock.
     private func syncToast() {
-        let message = model.errorMessage
+        let error = model.errorMessage, message = error ?? model.notice
         guard message != shownError else { return }
         let wasShown = shownError != nil
         shownError = message
         let still = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         if let message {
-            toast.rootView = ToastView(message: message) { [weak model] in model?.errorMessage = nil }
+            toast.rootView = ToastView(message: message, isError: error != nil) { [weak model] in
+                model?.errorMessage = nil
+                model?.notice = nil
+            }
             // It is easy to miss without sight: read it out.
             NSAccessibility.post(
                 element: NSApp as Any, notification: .announcementRequested,
-                userInfo: [.announcement: String(localized: "문제가 생겼습니다. \(message)"), .priority: NSAccessibilityPriorityLevel.high.rawValue])
+                userInfo: [.announcement: error != nil ? String(localized: "문제가 생겼습니다. \(message)") : message,
+                           .priority: NSAccessibilityPriorityLevel.high.rawValue])
             guard !wasShown else { return }
             toast.alphaValue = 0
             toastBottom.constant = still ? 0 : 12

@@ -278,25 +278,28 @@ final class StatusMarkView: NSView {
     }
 }
 
-/// An error, shown at the bottom of the panel without blocking anything.
-/// Its controller slides it in and out.
+/// An error, or how something is going (`isError` false), shown at the
+/// bottom of the panel without blocking anything. Its controller slides it in and out.
 struct ToastView: View {
     var message = ""
+    var isError = true
     var close: () -> Void = {}
 
     var body: some View {
         if !message.isEmpty {
             HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "exclamationmark.triangle")
+                Image(systemName: isError ? "exclamationmark.triangle" : "info.circle")
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Theme.danger)
+                    .foregroundStyle(isError ? Theme.danger : Theme.secondary)
                     .padding(.top, 1)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("문제가 생겼습니다").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.text)
+                    if isError {
+                        Text("문제가 생겼습니다").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.text)
+                    }
                     Text(message)
-                        .font(.system(size: 12))
-                        .foregroundStyle(Theme.secondary)
+                        .font(.system(size: isError ? 12 : 13))
+                        .foregroundStyle(isError ? Theme.secondary : Theme.text)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                 }
