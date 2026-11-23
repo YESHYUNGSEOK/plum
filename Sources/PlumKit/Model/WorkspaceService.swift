@@ -17,6 +17,8 @@ public enum WorkspaceService {
         public var uncommitted: [String] = []
         /// Commits that are on no remote. Only filled when the branch would be deleted.
         public var unpushed: [String] = []
+        /// Other worktrees inside the folder, deepest first: removing it takes them too.
+        public var nested: [Git.Worktree] = []
 
         public var isClean: Bool { uncommitted.isEmpty && unpushed.isEmpty }
     }
@@ -98,7 +100,38 @@ public enum WorkspaceService {
             }
         }
         if deletingBranch { check.unpushed = Git.unpushedCommits(on: workspace.branch, in: project.path) }
+        if !check.folderMissing, !workspace.isArchived { check.nested = nestedWorktrees(workspace, project: project) }
         return check
+    }
+
+    /// The worktrees git has inside a workspace's folder, deepest first.
+    public static func nestedWorktrees(_ workspace: Workspace, project: Project) -> [Git.Worktree] {
+        let folder = canonical(workspace.path) + "/"
+        return Git.worktrees(in: project.path).dropFirst() // never the main checkout
+            .filter { canonical($0.path).hasPrefix(folder) }
+            .sorted { $0.path.count > $1.path.count }
+    }
+
+    /// Deletes as Orca does: the worktrees inside the folder first, deepest first,
+    /// then the workspace's own, each branch only if merged. `approvedNested` is
+    /// the list the user confirmed; if git now has another, nothing is removed.
+    /// Returns the branches kept because they aren't merged.
+    public static func delete(_ workspace: Workspace, project: Project, force: Bool,
+                              approvedNested: [Git.Worktree]) throws -> [Git.Branch] {
+        var kept: [Git.Branch] = []
+        if !workspace.isArchived {
+            let nested = FileManager.default.fileExists(atPath: workspace.path) ? nestedWorktrees(workspace, project: project) : []
+            guard nested == approvedNested else {
+                throw GitError(message: String(localized: "안쪽 워크트리 목록이 바뀌었습니다. 다시 확인한 뒤 삭제하세요."))
+            }
+            for inner in nested {
+                try Git.removeWorktree(repository: project.path, path: inner.path, force: true)
+                if let branch = inner.branch, let left = Git.deleteBranchIfMerged(branch, in: project.path) { kept.append(left) }
+            }
+            try removeWorktree(workspace, project: project, force: force)
+        }
+        if let left = Git.deleteBranchIfMerged(workspace.branch, in: project.path) { kept.append(left) }
+        return kept
     }
 
     /// Removes the worktree folder and git's record of it. Without `force`,

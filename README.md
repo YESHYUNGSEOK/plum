@@ -97,8 +97,8 @@ To ship a build macOS opens directly, `release.sh` signs with the hardened runti
 5. **Rename and clean up** (right-click a workspace):
    - Rename (or double-click its name): changes only the name shown in the sidebar; the folder and branch stay.
    - Archive: removes the worktree folder and keeps the branch, so it can be restored later.
-   - Delete: removes the worktree folder and the local branch.
-   - Uncommitted changes, commits on no remote and programs that would be ended are listed first. Return means Cancel there.
+   - Delete: removes the worktree folder, and the local branch only if its work is already in its base, the remote's default branch (fetched first) or the main checkout, merged, squashed or rebased, as in Orca. An unmerged branch is kept, and Plum then offers to delete it anyway, listing its commits on no remote. Worktrees inside the folder go too, deepest first.
+   - Uncommitted changes, worktrees inside the folder and programs that would be ended are listed first. Return means Cancel there.
    - The main checkout can't be deleted; its menu offers removing the project from Plum instead.
    - Also: Mark as Read, Close All Tabs (keeps the worktree, frees what its programs held), Open In (the editors, terminals and git apps installed), Open PR, Copy (path, branch, PR link).
    - Right-click a project's name: New Workspace, Project Settings, Collapse, Show in Finder, Open In, Remove from Plum.

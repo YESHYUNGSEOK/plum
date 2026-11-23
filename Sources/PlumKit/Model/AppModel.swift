@@ -1281,17 +1281,26 @@ public final class AppModel {
         if selection == id { select(project.id) }
     }
 
-    /// Removes the worktree, the local branch and the record.
-    public func delete(_ id: UUID, force: Bool) async throws {
-        guard let workspace = state.workspaces.first(where: { $0.id == id }), let project = project(workspace.projectID) else { return }
-        if !workspace.isArchived { try await removeWorktree(of: workspace, project: project, force: force) }
-        let branch = workspace.branch
-        try await Task.detached {
-            if Git.branchExists(branch, in: project.path) { try Git.deleteBranch(branch, in: project.path) }
+    /// Removes the worktree and the worktrees inside its folder (`nested`, as the
+    /// user was shown them), each branch only if merged, and their records.
+    /// Returns the branches kept because they aren't merged.
+    @discardableResult
+    public func delete(_ id: UUID, force: Bool, nested: [Git.Worktree] = []) async throws -> [Git.Branch] {
+        guard let workspace = state.workspaces.first(where: { $0.id == id }), let project = project(workspace.projectID) else { return [] }
+        busy.insert(id)
+        defer { busy.remove(id) }
+        let kept = try await Task.detached {
+            try WorkspaceService.delete(workspace, project: project, force: force, approvedNested: nested)
         }.value
-        state.workspaces.removeAll { $0.id == id }
+        let gone = state.workspaces.filter { other in
+            other.id == id || (other.projectID == project.id && nested.contains { WorkspaceService.samePath($0.path, other.path) })
+        }.map(\.id)
+        // Only now that the folders are gone: if git refused, shells and agents stay.
+        for other in gone { closeAllTabs(in: other) }
+        state.workspaces.removeAll { gone.contains($0.id) }
         save()
-        if selection == id { select(project.id) }
+        if let selection, gone.contains(selection) { select(project.id) }
+        return kept
     }
 
     private func removeWorktree(of workspace: Workspace, project: Project, force: Bool) async throws {

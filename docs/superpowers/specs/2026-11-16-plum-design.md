@@ -114,10 +114,10 @@ Settings are stored only on the app's side. **[Proposal]**
 
 - **Archive**: removes the worktree folder (`git worktree remove`). The branch and the workspace record are kept.
 - **Restore**: makes the worktree again from the kept branch and runs the setup again.
-- **Delete**: removes the worktree, the workspace record and the local branch.
+- **Delete**: removes the worktree, the workspace record and the local branch. **[Decision, 2026-11-23]** As in Orca (checked in Orca 1.4.271's code), the branch goes only if its work is already in a target: `branch.<name>.base`, `origin/HEAD` (fetched first) or `HEAD`, by `git branch -d`, then a merge that would change nothing (`merge-tree`), a squash commit with the same patch (`patch-id`), or every commit already there (`cherry`). An unmerged branch is kept, and the app offers to delete it anyway; that deletes it only if it still points at the commit it pointed at. Worktrees inside the folder are listed in the confirmation and removed first, deepest first, each with the same branch rule; if git's list changed since the confirmation, nothing is removed.
 - **Preventing data loss (required)**:
   - Before archiving or deleting, check `git status --porcelain` (untracked files included). If there are changes, list the files and force the removal only after an extra confirmation.
-  - On delete, if the branch has commits on no remote, list them and get an extra confirmation.
+  - Before deleting a kept branch anyway, list its commits on no remote.
   - The confirmation says that the workspace's terminals end with it.
   - Only remove what actually shows in `git worktree list`, isn't the main worktree, and matches the path in the app's record.
 - When a worktree folder disappeared outside the app: the sidebar shows "Folder missing". On archive or delete, `git worktree remove` cleans up only that entry (`git worktree prune`, which acts on the whole repository, isn't used, since Orca may be managing the same repository).

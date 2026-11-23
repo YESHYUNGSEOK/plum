@@ -108,8 +108,86 @@ final class WorkspaceServiceTests: XCTestCase {
         XCTAssertEqual(restored.copiedFiles, [".env.local"])
 
         try WorkspaceService.removeWorktree(restored.workspace, project: project, force: false)
-        try Git.deleteBranch("eric/task", in: project.path)
+        XCTAssertNil(Git.deleteBranchIfMerged("eric/task", in: project.path), "no commits of its own: merged")
         XCTAssertFalse(Git.branchExists("eric/task", in: project.path))
+    }
+
+    private func commit(_ file: String, _ text: String, in path: String, _ message: String) throws {
+        try text.write(toFile: path + "/" + file, atomically: true, encoding: .utf8)
+        try Git.run(["add", "."], in: path)
+        try Git.run(["commit", "-q", "-m", message], in: path)
+    }
+
+    func testDeleteKeepsOnlyUnmergedBranchesAsOrcaDoes() throws {
+        let kept = try create("kept").workspace
+        try commit("kept.txt", "work", in: kept.path, "unmerged work")
+        let merged = try create("merged").workspace
+        try commit("merged.txt", "work", in: merged.path, "merged work")
+        try Git.run(["merge", "-q", "--no-ff", "-m", "merge", "eric/merged"], in: project.path)
+        let squashed = try create("squashed").workspace
+        try commit("a.txt", "one", in: squashed.path, "first")
+        try commit("b.txt", "two", in: squashed.path, "second")
+        try Git.run(["merge", "-q", "--squash", "eric/squashed"], in: project.path)
+        try Git.run(["commit", "-q", "-m", "squashed (#1)"], in: project.path)
+        try commit("later.txt", "main moved on", in: project.path, "later")
+
+        for ws in [kept, merged, squashed] {
+            let left = try WorkspaceService.delete(ws, project: project, force: false, approvedNested: [])
+            XCTAssertFalse(FileManager.default.fileExists(atPath: ws.path), ws.name)
+            XCTAssertEqual(left.map(\.name), ws.name == "kept" ? ["eric/kept"] : [], ws.name)
+        }
+        XCTAssertTrue(Git.branchExists("eric/kept", in: project.path), "unmerged work stays")
+        XCTAssertFalse(Git.branchExists("eric/merged", in: project.path))
+        XCTAssertFalse(Git.branchExists("eric/squashed", in: project.path), "a squash merge counts as merged")
+
+        // The offered "Delete Branch" only deletes the commit the user was told about.
+        let head = try Git.run(["rev-parse", "eric/kept"], in: project.path)
+        let other = try Git.run(["rev-parse", "main"], in: project.path)
+        XCTAssertThrowsError(try Git.deleteBranch("eric/kept", at: other, in: project.path))
+        XCTAssertTrue(Git.branchExists("eric/kept", in: project.path))
+        try Git.deleteBranch("eric/kept", at: head, in: project.path)
+        XCTAssertFalse(Git.branchExists("eric/kept", in: project.path))
+    }
+
+    func testABranchSquashMergedOnTheRemoteIsDeletedThoughMainWasNotPulled() throws {
+        let origin = sandbox.appendingPathComponent("origin.git").path
+        try Git.run(["init", "-q", "--bare", "-b", "main", origin], in: sandbox.path)
+        try Git.run(["remote", "add", "origin", origin], in: project.path)
+        try Git.run(["push", "-q", "origin", "main"], in: project.path)
+        try Git.run(["remote", "set-head", "origin", "main"], in: project.path)
+
+        let ws = try create("pr").workspace
+        try commit("feature.txt", "work", in: ws.path, "feature")
+        try Git.run(["push", "-q", "origin", "eric/pr"], in: ws.path)
+        // Someone squash-merges the pull request on the remote.
+        let other = sandbox.appendingPathComponent("other").path
+        try Git.run(["clone", "-q", origin, other], in: sandbox.path)
+        try Git.run(["-c", "user.email=t@example.com", "-c", "user.name=T", "merge", "-q", "--squash", "origin/eric/pr"], in: other)
+        try Git.run(["-c", "user.email=t@example.com", "-c", "user.name=T", "commit", "-q", "-m", "feature (#2)"], in: other)
+        try Git.run(["push", "-q", "origin", "main"], in: other)
+
+        XCTAssertEqual(try WorkspaceService.delete(ws, project: project, force: false, approvedNested: []), [])
+        XCTAssertFalse(Git.branchExists("eric/pr", in: project.path), "origin/main was fetched and holds the work")
+    }
+
+    func testDeleteTakesTheWorktreesInsideItsFolderFirst() throws {
+        let outer = try create("outer").workspace
+        let innerPath = outer.path + "/inner"
+        try Git.run(["worktree", "add", "-q", "-b", "eric/inner", innerPath], in: project.path)
+        try commit("inner.txt", "work", in: innerPath, "inner work")
+
+        let check = WorkspaceService.inspect(outer, project: project, deletingBranch: false)
+        XCTAssertEqual(check.nested.map(\.branch), ["eric/inner"])
+        XCTAssertFalse(check.isClean, "the inner worktree shows as untracked")
+        XCTAssertThrowsError(try WorkspaceService.delete(outer, project: project, force: true, approvedNested: []),
+                             "not the list the user was shown")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: innerPath + "/inner.txt"), "nothing removed")
+
+        let left = try WorkspaceService.delete(outer, project: project, force: true, approvedNested: check.nested)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: outer.path))
+        XCTAssertFalse(Git.worktrees(in: project.path).contains { $0.branch == "eric/inner" || $0.branch == "eric/outer" })
+        XCTAssertEqual(left.map(\.name), ["eric/inner"], "unmerged: kept")
+        XCTAssertFalse(Git.branchExists("eric/outer", in: project.path), "no commits of its own: merged")
     }
 
     func testDirtyWorktreeIsReportedAndNotRemovedWithoutForce() throws {

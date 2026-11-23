@@ -76,7 +76,6 @@
 "대기" = "to do";
 "대신 프로젝트를 목록에서 제거하세요." = "Remove the project from the list instead.";
 "뒤로" = "Back";
-"로컬 브랜치 %@를 지웁니다. 되돌릴 수 없습니다." = "The local branch %@ will be deleted. This can't be undone.";
 "마지막 워크스페이스" = "Last Workspace";
 "마지막 탭" = "Last Tab";
 "막대" = "Bar";
@@ -196,7 +195,6 @@
 "워크스페이스를 위로" = "Move Workspace Up";
 "워크트리 만들기" = "Create the worktree";
 "워크트리 폴더를 지우고 브랜치 %@는 남깁니다. 나중에 복원할 수 있습니다." = "The worktree folder is removed and the branch %@ is kept. You can restore it later.";
-"워크트리 폴더와 로컬 브랜치 %@를 지웁니다. 되돌릴 수 없습니다." = "The worktree folder and the local branch %@ will be deleted. This can't be undone.";
 "원격 가져오기" = "Fetch from the remote";
 "원격 기본 브랜치" = "the remote's default branch";
 "원격에 없는 커밋" = "Commits on no remote";
@@ -332,3 +330,12 @@
 "가져오기" = "Import";
 "저장소 %lld개와 워크트리 %lld개를 가져왔습니다." = "Imported %lld repositories and %lld worktrees.";
 " 브랜치가 없는 워크트리 %lld개와 폴더가 없는 워크트리 %lld개는 건너뛰었습니다." = " Skipped %lld worktrees without a branch and %lld whose folder is gone.";
+"브랜치 %@는 병합된 경우에만 지웁니다." = "The branch %@ is deleted only if it's merged.";
+"워크트리 폴더와 로컬 변경을 지웁니다. 브랜치 %@는 병합된 경우에만 지웁니다." = "The worktree folder and its local changes will be deleted. The branch %@ goes only if it's merged.";
+"함께 삭제되는 안쪽 워크트리" = "Worktrees inside, deleted too";
+"안쪽 워크트리 목록이 바뀌었습니다. 다시 확인한 뒤 삭제하세요." = "The worktrees inside it changed. Look again before deleting.";
+"병합되지 않은 브랜치를 남겼습니다" = "Kept Unmerged Branches";
+"%@는 병합되지 않아 지우지 않았습니다. 그래도 지울까요? 되돌릴 수 없습니다." = "%@ isn't merged, so it was kept. Delete it anyway? This can't be undone.";
+"브랜치 삭제" = "Delete Branch";
+"브랜치 %@가 다른 워크트리에 체크아웃되어 있습니다." = "The branch %@ is checked out in another worktree.";
+"브랜치 %@가 그 사이 바뀌었습니다. 확인한 뒤 지우세요." = "The branch %@ changed meanwhile. Look at it before deleting it.";

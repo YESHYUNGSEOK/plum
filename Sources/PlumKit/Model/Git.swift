@@ -35,7 +35,8 @@ public enum Git {
     /// Runs git in `directory` and returns trimmed stdout. Throws with git's
     /// own error text when it exits non-zero or takes longer than `timeout`.
     @discardableResult
-    public static func run(_ arguments: [String], in directory: String, timeout: TimeInterval = 60, using tool: URL? = nil) throws -> String {
+    public static func run(_ arguments: [String], in directory: String, timeout: TimeInterval = 60, using tool: URL? = nil,
+                           input: String? = nil) throws -> String {
         let process = Process()
         process.executableURL = tool ?? executable
         process.arguments = arguments
@@ -48,12 +49,18 @@ public enum Git {
         let stderr = Pipe()
         process.standardOutput = stdout
         process.standardError = stderr
-        process.standardInput = FileHandle.nullDevice
+        let stdin = input.map { _ in Pipe() }
+        process.standardInput = stdin ?? FileHandle.nullDevice
 
         // waitUntilExit() spins the run loop and can return ~100 ms late.
         let exited = DispatchSemaphore(value: 0)
         process.terminationHandler = { _ in exited.signal() }
         do { try process.run() } catch { throw GitError(message: String(localized: "git을 실행할 수 없습니다: \(error.localizedDescription)")) }
+        if let stdin, let input {
+            let writer = stdin.fileHandleForWriting
+            _ = fcntl(writer.fileDescriptor, F_SETNOSIGPIPE, 1) // git exiting early must not kill the app
+            DispatchQueue.global().async { try? writer.write(contentsOf: Data(input.utf8)); try? writer.close() }
+        }
 
         // Drain both pipes while git runs, or a chatty command fills one and stalls.
         var errorData = Data()
@@ -192,8 +199,123 @@ public enum Git {
         try run(["worktree", "remove"] + (force ? ["--force"] : []) + [path], in: repository, timeout: 300)
     }
 
-    public static func deleteBranch(_ branch: String, in repository: String) throws {
-        try run(["branch", "-D", branch], in: repository)
+    /// A local branch and the commit it pointed at.
+    public struct Branch: Equatable, Sendable {
+        public var name: String
+        public var head: String
+    }
+
+    /// Deletes a local branch only when its work is already in a base, as Orca
+    /// does after removing a worktree: `git branch -d`, then Orca's checks for
+    /// squash and rebase merges. Returns the branch when it was kept.
+    public static func deleteBranchIfMerged(_ branch: String, in repository: String) -> Branch? {
+        guard let head = try? run(["rev-parse", "--verify", "--quiet", "refs/heads/\(branch)^{commit}"], in: repository),
+              !worktrees(in: repository).contains(where: { $0.branch == branch }) else { return nil }
+        if (try? run(["branch", "-d", "--", branch], in: repository)) != nil { return nil }
+        if isMerged(branch, in: repository), (try? deleteBranch(branch, at: head, in: repository)) != nil { return nil }
+        return Branch(name: branch, head: head)
+    }
+
+    /// Deletes `branch` whatever it holds, but only while it still points at `head`.
+    public static func deleteBranch(_ branch: String, at head: String, in repository: String) throws {
+        guard !worktrees(in: repository).contains(where: { $0.branch == branch }) else {
+            throw GitError(message: String(localized: "브랜치 \(branch)가 다른 워크트리에 체크아웃되어 있습니다."))
+        }
+        do { try run(["update-ref", "-d", "refs/heads/\(branch)", head], in: repository) } catch {
+            throw GitError(message: String(localized: "브랜치 \(branch)가 그 사이 바뀌었습니다. 확인한 뒤 지우세요."))
+        }
+        _ = try? run(["config", "--remove-section", "branch.\(branch)"], in: repository)
+    }
+
+    /// Orca's test: is the branch's work in its base (`branch.<name>.base`), the
+    /// remote's default branch (fetched first) or HEAD, merged, squashed or rebased?
+    static func isMerged(_ branch: String, in repository: String) -> Bool {
+        var targets: [String] = []
+        for target in [try? run(["config", "--get", "branch.\(branch).base"], in: repository),
+                       try? run(["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"], in: repository), "HEAD"] {
+            if let target, !target.isEmpty, !target.hasPrefix("-"), !targets.contains(target) { targets.append(target) }
+        }
+        let local = targets.filter { $0 == "HEAD" || $0.hasPrefix("refs/heads/") || $0.hasPrefix("refs/tags/") }
+        let ref = "refs/heads/\(branch)"
+        return holds(ref, in: local, repository)
+            || holds(ref, in: refreshed(targets.filter { !local.contains($0) }, in: repository), repository)
+    }
+
+    /// Fetches each remote-tracking target from its remote; only those that came in count.
+    private static func refreshed(_ targets: [String], in repository: String) -> [String] {
+        let remotes = ((try? run(["remote"], in: repository)) ?? "").split(separator: "\n").map(String.init)
+            .filter { !$0.hasPrefix("-") }.sorted { $0.count > $1.count }
+        return targets.filter { target in
+            guard let remote = remotes.first(where: { target.hasPrefix("refs/remotes/\($0)/") }) else { return false }
+            let specs = ((try? run(["config", "--get-all", "remote.\(remote).fetch"], in: repository)) ?? "").split(separator: "\n")
+            guard let source = specs.lazy.compactMap({ source(of: target, refspec: String($0)) }).first else { return false }
+            return (try? run(["fetch", "--quiet", "--no-tags", remote, "+\(source):\(target)"], in: repository, timeout: 20)) != nil
+        }
+    }
+
+    /// The remote ref a fetch refspec maps onto `target`, e.g. refs/heads/main for
+    /// refs/remotes/origin/main under `+refs/heads/*:refs/remotes/origin/*`.
+    private static func source(of target: String, refspec: String) -> String? {
+        let spec = refspec.hasPrefix("+") ? String(refspec.dropFirst()) : refspec
+        let sides = spec.split(separator: ":", maxSplits: 1).map(String.init)
+        guard sides.count == 2, !spec.hasPrefix("^") else { return nil }
+        let (from, to) = (sides[0], sides[1])
+        guard let star = to.firstIndex(of: "*") else { return to == target ? from : nil }
+        let (prefix, suffix) = (String(to[..<star]), String(to[to.index(after: star)...]))
+        guard target.hasPrefix(prefix), target.hasSuffix(suffix), target.count >= prefix.count + suffix.count else { return nil }
+        return from.replacingOccurrences(of: "*", with: String(target.dropFirst(prefix.count).dropLast(suffix.count)))
+    }
+
+    /// Whether any of `targets` already has the work on `ref`.
+    private static func holds(_ ref: String, in targets: [String], _ repository: String) -> Bool {
+        for target in targets {
+            guard let commit = try? run(["rev-parse", "--verify", "--quiet", "\(target)^{commit}"], in: repository), !commit.isEmpty,
+                  let base = try? run(["merge-base", commit, ref], in: repository), !base.isEmpty else { continue }
+            let files = (try? run(["diff", "--name-only", "--no-renames", base, ref], in: repository)) ?? ""
+            if files.isEmpty, (try? run(["merge-base", "--is-ancestor", ref, commit], in: repository)) == nil { continue }
+            if mergeChangesNothing(ref, into: commit, repository) { return true }
+            let merges = Int((try? run(["rev-list", "--right-only", "--merges", "--count", "\(commit)...\(ref)"], in: repository)) ?? "") ?? 0
+            if merges > 0 {
+                if squashed(ref, into: commit, base: base, files: files, repository) { return true }
+            } else if let cherry = try? run(["cherry", commit, ref], in: repository), !cherry.isEmpty,
+                      cherry.split(separator: "\n").allSatisfy({ $0.hasPrefix("-") }) {
+                return true // every commit is in the target as a patch: rebased
+            }
+        }
+        return false
+    }
+
+    /// Merging `ref` into `commit` would leave its tree as it is.
+    private static func mergeChangesNothing(_ ref: String, into commit: String, _ repository: String) -> Bool {
+        guard let merged = try? run(["merge-tree", "--write-tree", commit, ref], in: repository),
+              let tree = try? run(["rev-parse", "--verify", "--quiet", "\(commit)^{tree}"], in: repository) else { return false }
+        return merged.split(separator: "\n").first.map(String.init) == tree
+    }
+
+    /// A commit on the target since `base` that is the branch's whole diff as one patch.
+    private static func squashed(_ ref: String, into commit: String, base: String, files: String, _ repository: String) -> Bool {
+        let log = (try? run(["log", "--no-show-signature", "--format=%x00%H %P", "--name-only", "--no-renames",
+                             "--ancestry-path", "--max-count=201", "\(base)..\(commit)"], in: repository)) ?? ""
+        let entries = log.split(separator: "\0").filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        guard !entries.isEmpty, entries.count <= 200 else { return false }
+        func fileSet(_ text: some StringProtocol) -> [String] {
+            text.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.sorted()
+        }
+        let wanted = fileSet(files)
+        let candidates = entries.compactMap { entry -> String? in
+            let lines = entry.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+            let ids = lines[0].trimmingCharacters(in: .whitespaces).split(separator: " ")
+            guard let hash = ids.first else { return nil }
+            return ids.count > 2 || fileSet(lines.count > 1 ? lines[1] : "") == wanted ? String(hash) : nil
+        }
+        guard let patch = patchID(["diff", base, ref], repository) else { return false }
+        return candidates.contains { patchID(["show", "--format=", $0], repository) == patch && mergeChangesNothing(ref, into: $0, repository) }
+    }
+
+    private static func patchID(_ diff: [String], _ repository: String) -> String? {
+        guard let text = try? run(diff, in: repository), !text.isEmpty,
+              let id = try? run(["patch-id", "--stable"], in: repository, input: text + "\n") else { return nil }
+        return id.split(separator: " ").first.map(String.init)
     }
 }
 

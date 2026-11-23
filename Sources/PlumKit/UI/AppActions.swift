@@ -74,17 +74,39 @@ enum AppActions {
 
     static func delete(_ model: AppModel, _ workspace: Workspace) {
         Task {
-            let check = await model.removalCheck(workspace.id, deletingBranch: true)
+            // As in Orca, a branch that isn't merged is kept, so only local changes can be lost.
+            let check = await model.removalCheck(workspace.id, deletingBranch: false)
             let openTabs = model.tabs[workspace.id]?.count ?? 0
             let summary = workspace.isArchived
-                ? String(localized: "로컬 브랜치 \(workspace.branch)를 지웁니다. 되돌릴 수 없습니다.")
-                : String(localized: "워크트리 폴더와 로컬 브랜치 \(workspace.branch)를 지웁니다. 되돌릴 수 없습니다.")
+                ? String(localized: "브랜치 \(workspace.branch)는 병합된 경우에만 지웁니다.")
+                : String(localized: "워크트리 폴더와 로컬 변경을 지웁니다. 브랜치 \(workspace.branch)는 병합된 경우에만 지웁니다.")
+            let folder = WorkspaceService.canonical(workspace.path) + "/"
+            let nested = check.nested.isEmpty ? [] : [Confirmation.Section(
+                title: String(localized: "함께 삭제되는 안쪽 워크트리"),
+                lines: check.nested.map { String(WorkspaceService.canonical($0.path).dropFirst(folder.count)) + ($0.branch.map { "  \($0)" } ?? "") })]
             guard await ask(model, Confirmation(
                 title: String(localized: "‘\(workspace.name)’을 삭제할까요?"), summary: summary,
-                sections: losses(check) + running(model, workspace.id), note: terminalsNote(openTabs),
+                sections: losses(check) + nested + running(model, workspace.id), note: terminalsNote(openTabs),
                 action: check.isClean ? String(localized: "삭제") : String(localized: "잃어도 좋으니 삭제"), destructive: true))
             else { return }
-            await run(model) { try await model.delete(workspace.id, force: !check.uncommitted.isEmpty) }
+            var kept: [Git.Branch] = []
+            await run(model) { kept = try await model.delete(workspace.id, force: !check.uncommitted.isEmpty, nested: check.nested) }
+            if let project = model.project(workspace.projectID) { await offerToDelete(kept, in: project, model) }
+        }
+    }
+
+    /// Orca's "force delete" for the branches a delete kept because they aren't merged.
+    private static func offerToDelete(_ kept: [Git.Branch], in project: Project, _ model: AppModel) async {
+        guard !kept.isEmpty else { return }
+        let commits = await Task.detached { kept.flatMap { Git.unpushedCommits(on: $0.name, in: project.path) } }.value
+        guard await ask(model, Confirmation(
+            title: String(localized: "병합되지 않은 브랜치를 남겼습니다"),
+            summary: String(localized: "\(kept.map(\.name).joined(separator: ", "))는 병합되지 않아 지우지 않았습니다. 그래도 지울까요? 되돌릴 수 없습니다."),
+            sections: commits.isEmpty ? [] : [.init(title: String(localized: "원격에 없는 커밋"), lines: commits, maxCode: 40)],
+            action: String(localized: "브랜치 삭제"), destructive: true))
+        else { return }
+        await run(model) {
+            try await Task.detached { for branch in kept { try Git.deleteBranch(branch.name, at: branch.head, in: project.path) } }.value
         }
     }
 

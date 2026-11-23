@@ -59,7 +59,8 @@ extension AppModel {
         case "check": // name|0 or 1 (branch would be deleted)
             guard fields.count == 2, let workspace = find(fields[0]), let project = project(workspace.projectID) else { return "bad arguments" }
             let check = WorkspaceService.inspect(workspace, project: project, deletingBranch: fields[1] == "1")
-            return json(["missing": check.folderMissing, "uncommitted": check.uncommitted, "unpushed": check.unpushed])
+            return json(["missing": check.folderMissing, "uncommitted": check.uncommitted, "unpushed": check.unpushed,
+                         "nested": check.nested.map(\.path)])
         case "archive", "delete": // name|0 or 1 (force)
             guard fields.count == 2, let workspace = find(fields[0]) else { return "bad arguments" }
             let force = fields[1] == "1"
