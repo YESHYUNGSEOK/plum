@@ -70,6 +70,32 @@ public enum HookSettings {
     }
 }
 
+/// Codex's background server keeps links to its sockets in CODEX_HOME. One
+/// left pointing at a socket that is gone stops every later start: the new
+/// server can't put its link where the old one is ("File exists") and `codex`
+/// quits with "app server did not become ready". Plum removes such a link
+/// before Codex starts, so nobody has to find it by hand.
+public enum CodexDaemon {
+    static let links = ["app-server-control/app-server-control.sock", "app-server-daemon/daemon-updater.sock"]
+
+    /// The links it removed. One made in the last minute stays: a server
+    /// starting right now may not have made its socket yet.
+    @discardableResult
+    public static func removeStaleLinks(home: String = (CodexHooks.file() as NSString).deletingLastPathComponent,
+                                        now: Date = Date()) -> [String] {
+        let manager = FileManager.default
+        return links.compactMap { link in
+            let path = (home as NSString).appendingPathComponent(link)
+            guard let attributes = try? manager.attributesOfItem(atPath: path), // the link itself
+                  attributes[.type] as? FileAttributeType == .typeSymbolicLink,
+                  !manager.fileExists(atPath: path), // what it points at
+                  let made = attributes[.modificationDate] as? Date, now.timeIntervalSince(made) > 60,
+                  (try? manager.removeItem(atPath: path)) != nil else { return nil }
+            return path
+        }
+    }
+}
+
 /// Codex has no flag like Claude's `--settings`: its hooks live in
 /// `hooks.json` in CODEX_HOME. Plum appends one group per event there, as
 /// Orca does, marked so it finds them again; outside Plum they do nothing.

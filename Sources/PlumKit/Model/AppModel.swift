@@ -156,6 +156,8 @@ public final class AppModel {
            (try? Data(ShellIntegration.zshenv.utf8).write(to: zsh.appendingPathComponent(".zshenv"), options: .atomic)) != nil {
             zshIntegrationPath = zsh.path
         }
+        // Also for `codex` typed in a terminal, which Plum doesn't prepare.
+        CodexDaemon.removeStaleLinks()
 
         let server = StatusServer(
             directory: store.directory,
@@ -1108,7 +1110,10 @@ public final class AppModel {
     /// folder is trusted, so it starts working instead of asking.
     private func prepare(_ program: TabProgram, in folder: String?) {
         // Codex reports its state through hooks in its own folder.
-        if program == .codex { CodexHooks.install() }
+        if program == .codex {
+            CodexDaemon.removeStaleLinks()
+            CodexHooks.install()
+        }
         guard state.settings.trustWorkspaces, let folder else { return }
         switch program {
         case .claude: ClaudeTrust.grant(folder)

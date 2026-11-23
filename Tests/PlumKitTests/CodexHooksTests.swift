@@ -52,6 +52,25 @@ final class CodexHooksTests: XCTestCase {
         XCTAssertEqual(CodexHooks.install(file: home.appendingPathComponent("no-codex/hooks.json").path), .missingConfig)
     }
 
+    /// A link to a server socket that is gone stops every later `codex`
+    /// ("app server did not become ready"); Plum clears it.
+    func testALeftoverServerLinkIsRemoved() throws {
+        let manager = FileManager.default
+        for folder in ["app-server-control", "app-server-daemon"] {
+            try manager.createDirectory(at: home.appendingPathComponent(folder), withIntermediateDirectories: true)
+        }
+        let stale = home.path + "/app-server-control/app-server-control.sock"
+        try manager.createSymbolicLink(atPath: stale, withDestinationPath: "/private/tmp/plum-gone-\(UUID().uuidString)/server.sock")
+        try Data("{}".utf8).write(to: URL(fileURLWithPath: file))
+        let live = home.path + "/app-server-daemon/daemon-updater.sock"
+        try manager.createSymbolicLink(atPath: live, withDestinationPath: file)
+
+        XCTAssertEqual(CodexDaemon.removeStaleLinks(home: home.path), [], "just made: a server may be starting")
+        XCTAssertEqual(CodexDaemon.removeStaleLinks(home: home.path, now: Date().addingTimeInterval(120)), [stale])
+        XCTAssertThrowsError(try manager.destinationOfSymbolicLink(atPath: stale))
+        XCTAssertEqual(try manager.destinationOfSymbolicLink(atPath: live), file, "one that leads somewhere stays")
+    }
+
     func testTheHookReportsOnlyInsidePlum() throws {
         try XCTSkipUnless(FileManager.default.fileExists(atPath: "/usr/bin/nc"))
         XCTAssertEqual(CodexHooks.install(file: file), .granted)
