@@ -1,0 +1,21 @@
+Sources/PlumKit/Model/OrcaImport.swift
+  s_5d4157ea22ed43::t_ee68c7083e4101 1-94
+Tests/PlumKitTests/OrcaImportTests.swift
+  s_5d4157ea22ed43::t_57922102022b3d 1-77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1a9154da878658c7f2c9c5ebaa46539e2f929dc8",
+  "prompts": {},
+  "sessions": {
+    "s_5d4157ea22ed43": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_5d4157ea22ed43",
+        "model": "unknown"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    }
+  }
+}
