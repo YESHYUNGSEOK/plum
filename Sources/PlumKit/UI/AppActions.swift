@@ -151,8 +151,10 @@ enum AppActions {
     /// Brings in what the user had in Orca, once (OrcaImport): asks, then
     /// adds. `quietly` (the first-launch offer) says nothing unless there
     /// is something to bring in.
-    static func importFromOrca(_ model: AppModel, quietly: Bool) async {
-        guard let cli = OrcaImport.cli() else {
+    static let orcaOfferedKey = "offeredOrcaImport"
+
+    static func importFromOrca(_ model: AppModel, quietly: Bool, cli: URL? = OrcaImport.cli()) async {
+        guard let cli else {
             if !quietly { model.errorMessage = String(localized: "Orca가 설치되어 있지 않습니다.") }
             return
         }
@@ -170,11 +172,19 @@ enum AppActions {
             if !quietly { model.notice = String(localized: "Orca에 가져올 저장소가 없습니다.") }
             return
         }
+        let new = model.notInPlum(catalog)
+        guard !new.repos.isEmpty || !new.worktrees.isEmpty else {
+            if !quietly { model.notice = String(localized: "Orca의 저장소와 워크트리가 이미 모두 Plum에 있습니다.") }
+            return
+        }
         // Don't take over a dialog that is already open.
-        guard model.sheet == nil, await ask(model, Confirmation(
+        guard model.sheet == nil else { return }
+        // The first-launch offer counts as made once it has asked.
+        if quietly { UserDefaults.standard.set(true, forKey: orcaOfferedKey) }
+        guard await ask(model, Confirmation(
             title: String(localized: "Orca에서 가져올까요?"),
-            summary: String(localized: "저장소 \(catalog.repos.count)개와 워크트리 \(catalog.worktrees.count)개를 Plum 목록에 더합니다. 디스크의 파일은 바뀌지 않습니다."),
-            sections: [.init(title: String(localized: "저장소"), lines: catalog.repos.map(\.name))],
+            summary: String(localized: "저장소 \(new.repos.count)개와 워크트리 \(new.worktrees.count)개를 Plum 목록에 더합니다. 새 저장소의 다른 git 워크트리도 함께 보입니다. 디스크의 파일은 바뀌지 않습니다."),
+            sections: new.repos.isEmpty ? [] : [.init(title: String(localized: "저장소"), lines: new.repos.map(\.name))],
             action: String(localized: "가져오기"), destructive: false)) else { return }
         let result = await model.importFromOrca(catalog)
         var message = String(localized: "저장소 \(result.projects)개와 워크트리 \(result.workspaces)개를 가져왔습니다.")

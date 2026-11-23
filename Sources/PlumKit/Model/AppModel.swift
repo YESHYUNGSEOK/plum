@@ -1062,6 +1062,17 @@ public final class AppModel {
         return result
     }
 
+    /// The part of `catalog` Plum doesn't have yet (by path): what an
+    /// import would add, before its new projects' other git worktrees.
+    func notInPlum(_ catalog: OrcaImport.Catalog) -> OrcaImport.Catalog {
+        var new = catalog
+        new.repos.removeAll { repo in state.projects.contains { WorkspaceService.samePath($0.path, repo.path) } }
+        new.worktrees.removeAll { worktree in state.workspaces.contains { WorkspaceService.samePath($0.path, worktree.path) } }
+        new.detached = 0
+        new.missing = 0
+        return new
+    }
+
     /// `base`, or `base-2`, `base-3`… when a project already has that name.
     private func uniqueProjectName(_ base: String) -> String {
         var name = base

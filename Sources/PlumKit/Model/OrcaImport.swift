@@ -56,7 +56,8 @@ enum OrcaImport {
 
     /// What Orca has, from its CLI, with every path checked on disk: a
     /// repository's folder must be a git repository (its root is kept), a
-    /// worktree's folder must exist (else it counts as missing).
+    /// worktree's folder must exist (else it counts as missing) and be one
+    /// of that repository's worktrees by git's own list.
     static func load(cli: URL, timeout: TimeInterval = 15) async throws -> Catalog {
         try await Task.detached {
             var catalog = try parse(repos: run(cli, ["repo", "list", "--json"], timeout: timeout),
@@ -67,10 +68,26 @@ enum OrcaImport {
                 repo.path = root
                 return repo
             }
-            let kept = Set(catalog.repos.map(\.id))
+            // Orca names worktrees; git says which are this repository's
+            // (not its main checkout) and on what branch. A branch from Orca
+            // never reaches git's arguments.
+            var known: [String: (root: String, worktrees: [Git.Worktree])] = [:]
+            for repo in catalog.repos { known[repo.id] = (repo.path, Git.worktrees(in: repo.path)) }
             var worktrees: [Worktree] = []
-            for worktree in catalog.worktrees where kept.contains(worktree.repoID) {
-                if FileManager.default.fileExists(atPath: worktree.path) { worktrees.append(worktree) } else { catalog.missing += 1 }
+            for var worktree in catalog.worktrees {
+                guard let (root, gits) = known[worktree.repoID] else { continue }
+                guard FileManager.default.fileExists(atPath: worktree.path) else {
+                    catalog.missing += 1
+                    continue
+                }
+                guard !WorkspaceService.samePath(worktree.path, root),
+                      let git = gits.first(where: { WorkspaceService.samePath($0.path, worktree.path) }) else { continue }
+                guard let branch = git.branch else {
+                    catalog.detached += 1
+                    continue
+                }
+                worktree.branch = branch
+                worktrees.append(worktree)
             }
             catalog.worktrees = worktrees
             return catalog

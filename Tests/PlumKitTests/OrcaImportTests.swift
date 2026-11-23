@@ -153,7 +153,61 @@ final class OrcaImportTests: XCTestCase {
         }
     }
 
+    /// Orca names worktrees; git says which they are and on what branch. A
+    /// branch from Orca never reaches git's arguments.
+    func testGitHasTheLastWordOnBranches() async throws {
+        let (repo, worktree) = try gitRepo()
+        let plain = scratch.appendingPathComponent("plain").path
+        try FileManager.default.createDirectory(atPath: plain, withIntermediateDirectories: true)
+        let cli = try fakeCLI(
+            repos: repos(#"{"id":"r1","path":"\#(repo)","displayName":"Repo"}"#),
+            worktrees: worktrees(#"""
+                {"id":"w1","repoId":"r1","path":"\#(worktree)","branch":"refs/heads/--output=\#(scratch.path)/x","isMainWorktree":false,"displayName":"X"},
+                {"id":"w2","repoId":"r1","path":"\#(repo)","branch":"refs/heads/main","displayName":"main, unflagged"},
+                {"id":"w3","repoId":"r1","path":"\#(plain)","branch":"refs/heads/y","isMainWorktree":false,"displayName":"not a worktree"}
+                """#))
+        let catalog = try await OrcaImport.load(cli: cli)
+        XCTAssertEqual(catalog.worktrees.map(\.name), ["X"])
+        XCTAssertEqual(catalog.worktrees.map(\.branch), ["feat/x"], "git's branch, not Orca's")
+    }
+
     // MARK: Into Plum
+
+    @MainActor
+    func testWhatIsNewIsWhatPlumLacks() async throws {
+        let (repo, worktree) = try gitRepo()
+        let root = try XCTUnwrap(Git.repositoryRoot(of: repo))
+        let catalog = OrcaImport.Catalog(
+            repos: [OrcaImport.Repo(id: "r1", path: root, name: "Alpha")],
+            worktrees: [OrcaImport.Worktree(repoID: "r1", path: worktree, branch: "feat/x", name: "X")])
+        let model = model()
+        XCTAssertEqual(model.notInPlum(catalog), catalog)
+        await model.importFromOrca(catalog)
+        XCTAssertEqual(model.notInPlum(catalog), OrcaImport.Catalog(), "asked again: nothing new")
+    }
+
+    @MainActor
+    func testTheFirstLaunchOfferIsUsedUpOnlyWhenItAsks() async throws {
+        let key = AppActions.orcaOfferedKey
+        UserDefaults.standard.removeObject(forKey: key)
+        defer { UserDefaults.standard.removeObject(forKey: key) }
+        let model = model()
+
+        let off = try fakeCLI(#"echo '{"ok":false,"error":{"code":"runtime_unavailable"}}'; exit 1"#)
+        await AppActions.importFromOrca(model, quietly: true, cli: off)
+        XCTAssertFalse(UserDefaults.standard.bool(forKey: key), "Orca was off: nothing was offered")
+
+        let (repo, _) = try gitRepo()
+        let on = try fakeCLI(repos: repos(#"{"id":"r1","path":"\#(repo)","displayName":"Repo"}"#), worktrees: worktrees(""))
+        let asking = Task { await AppActions.importFromOrca(model, quietly: true, cli: on) }
+        let deadline = Date().addingTimeInterval(5)
+        while model.sheet == nil, Date() < deadline { try await Task.sleep(nanoseconds: 20_000_000) }
+        XCTAssertTrue(UserDefaults.standard.bool(forKey: key), "asked: the offer is used up")
+        guard case .confirm(let confirmation) = model.sheet else { return XCTFail("no question") }
+        confirmation.onAnswer?(false)
+        await asking.value
+        XCTAssertTrue(model.state.projects.isEmpty, "declined")
+    }
 
     @MainActor
     private func model() -> AppModel {

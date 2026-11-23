@@ -85,8 +85,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         updateBadge()
         model.start(debug: debug)
         // Someone coming from Orca: offered once what they had there.
-        if !debug, model.state.projects.isEmpty, !UserDefaults.standard.bool(forKey: "offeredOrcaImport"), OrcaImport.cli() != nil {
-            UserDefaults.standard.set(true, forKey: "offeredOrcaImport")
+        // (Until it has actually asked: Orca may be off on that launch.)
+        if !debug, model.state.projects.isEmpty, !UserDefaults.standard.bool(forKey: AppActions.orcaOfferedKey), OrcaImport.cli() != nil {
             Task { await AppActions.importFromOrca(model, quietly: true) }
         }
         if debug {

@@ -326,7 +326,8 @@
 "Orca의 출력을 읽지 못해 가져오지 않았습니다 (Orca %@)." = "Couldn't read Orca's output, so nothing was imported (Orca %@).";
 "Orca에 가져올 저장소가 없습니다." = "Orca has no repositories to import.";
 "Orca에서 가져올까요?" = "Import from Orca?";
-"저장소 %lld개와 워크트리 %lld개를 Plum 목록에 더합니다. 디스크의 파일은 바뀌지 않습니다." = "Adds %lld repositories and %lld worktrees to Plum's list. Nothing on disk changes.";
+"저장소 %lld개와 워크트리 %lld개를 Plum 목록에 더합니다. 새 저장소의 다른 git 워크트리도 함께 보입니다. 디스크의 파일은 바뀌지 않습니다." = "Adds %lld repositories and %lld worktrees to Plum's list. A new repository's other git worktrees show up too. Nothing on disk changes.";
+"Orca의 저장소와 워크트리가 이미 모두 Plum에 있습니다." = "Everything in Orca is already in Plum.";
 "저장소" = "Repositories";
 "가져오기" = "Import";
 "저장소 %lld개와 워크트리 %lld개를 가져왔습니다." = "Imported %lld repositories and %lld worktrees.";
