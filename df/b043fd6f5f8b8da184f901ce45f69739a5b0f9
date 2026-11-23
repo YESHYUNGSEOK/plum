@@ -1,0 +1,27 @@
+README.ko.md
+  s_bf0ed424735551::t_e916d8e8914569 86
+README.md
+  s_bf0ed424735551::t_886c858ba50f2d 90
+Sources/PlumKit/Model/AppModel.swift
+  s_bf0ed424735551::t_85a3458c6f0723 133,1319
+Sources/PlumKit/UI/Sheets.swift
+  s_bf0ed424735551::t_9fdf3d4b4f1ad9 306-307
+docs/superpowers/specs/2026-11-16-plum-design.md
+  s_bf0ed424735551::t_5bd3369537e0fb 104
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "dfb043fd6f5f8b8da184f901ce45f69739a5b0f9",
+  "prompts": {},
+  "sessions": {
+    "s_bf0ed424735551": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5ac29605-eee3-4cf1-9703-b5fa4086d055",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    }
+  }
+}
