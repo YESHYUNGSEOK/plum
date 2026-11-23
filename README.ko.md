@@ -167,6 +167,7 @@ Apple이 발급한 인증서 없이 만든 빌드(`bundle.sh`가 만드는 것)�
 | 경로 | 설정 | 비고 |
 |---|---|---|
 | Claude Code 훅 | `claude --settings "$PLUM_CLAUDE_SETTINGS"`로 실행 | 작업 중·입력 대기·완료를 모두 알린다. `~/.claude/settings.json`은 건드리지 않는다 |
+| Codex 훅 | 없음. 처음 Codex 탭을 열 때 `~/.codex/hooks.json`(또는 `$CODEX_HOME`)에 Plum 터미널에서만 동작하는 훅을 덧붙인다 | 작업 중·입력 대기·완료를 알린다. Codex가 처음 한 번 묻는 대로 Codex 안에서 `/hooks`로 신뢰해야 동작한다. 원래 파일은 `hooks.json.pre-plum`에 남기고, 사용자의 훅은 자리와 내용 그대로 둔다 |
 | OSC 7501 (프로그램 상태 표준) | 없음 | 이 표준을 지원하는 프로그램이면 자동 |
 | OSC 9 / OSC 777 알림, 벨 | 없음 | 보고 있지 않은 탭에서만 "입력 대기"로 표시 |
 

@@ -172,6 +172,7 @@ The state comes in three ways:
 | Way | Setup | Notes |
 |---|---|---|
 | Claude Code hooks | run `claude --settings "$PLUM_CLAUDE_SETTINGS"` | reports working, waiting and done. `~/.claude/settings.json` is left alone |
+| Codex hooks | none: the first Codex tab adds hooks that only act in Plum's terminals to `~/.codex/hooks.json` (or `$CODEX_HOME`) | report working, waiting and done once trusted in Codex with `/hooks`, as Codex asks the first time. The file as it was is kept as `hooks.json.pre-plum`; your own hooks keep their places |
 | OSC 7501 (program state) | none | any program that sends it |
 | OSC 9 / OSC 777 notifications, bell | none | shown as "waiting" only for tabs you aren't looking at |
 

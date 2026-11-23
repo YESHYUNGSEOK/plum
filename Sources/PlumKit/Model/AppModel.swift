@@ -1104,6 +1104,8 @@ public final class AppModel {
     /// Before an agent opens in `folder`, Orca-style: its config is told the
     /// folder is trusted, so it starts working instead of asking.
     private func prepare(_ program: TabProgram, in folder: String?) {
+        // Codex reports its state through hooks in its own folder.
+        if program == .codex { CodexHooks.install() }
         guard state.settings.trustWorkspaces, let folder else { return }
         switch program {
         case .claude: ClaudeTrust.grant(folder)

@@ -70,6 +70,67 @@ public enum HookSettings {
     }
 }
 
+/// Codex has no flag like Claude's `--settings`: its hooks live in
+/// `hooks.json` in CODEX_HOME. Plum appends one group per event there, as
+/// Orca does, marked so it finds them again; outside Plum they do nothing.
+/// The user's own hooks keep their places (Codex trusts hooks by position),
+/// and the file as it was is kept once as `hooks.json.pre-plum`. Codex runs
+/// new hooks only after the user trusts them once (`/hooks` in Codex).
+public enum CodexHooks {
+    static let marker = ": plum-agent-hook-form=1;"
+    static let events = ["UserPromptSubmit": "working", "PostToolUse": "working", "PermissionRequest": "waiting", "Stop": "done"]
+
+    public static func file(environment: [String: String] = ProcessInfo.processInfo.environment, home: String = NSHomeDirectory()) -> String {
+        (CodexTrust.configFile(environment: environment, home: home) as NSString).deletingLastPathComponent + "/hooks.json"
+    }
+
+    @discardableResult
+    public static func install(file: String = file()) -> ClaudeTrust.Result {
+        let manager = FileManager.default
+        // No Codex folder, no Codex to tell.
+        guard manager.fileExists(atPath: (file as NSString).deletingLastPathComponent) else { return .missingConfig }
+        var root: [String: Any] = [:]
+        if let data = manager.contents(atPath: file) {
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return .unreadable }
+            root = json
+        } else if manager.fileExists(atPath: file) {
+            return .unreadable
+        }
+        guard var hooks = (root["hooks"] ?? [String: Any]()) as? [String: Any] else { return .unreadable }
+        var changed = false
+        for (event, state) in events {
+            guard var groups = (hooks[event] ?? [[String: Any]]()) as? [[String: Any]] else { return .unreadable }
+            let command = marker + " " + HookSettings.command(state)
+            let mine = groups.firstIndex { group in
+                (group["hooks"] as? [[String: Any]] ?? []).contains { ($0["command"] as? String)?.hasPrefix(marker) == true }
+            }
+            let group: [String: Any] = ["hooks": [["type": "command", "command": command]]]
+            if let mine {
+                guard (groups[mine]["hooks"] as? [[String: Any]])?.first?["command"] as? String != command else { continue }
+                groups[mine] = group
+            } else {
+                groups.append(group)
+            }
+            hooks[event] = groups
+            changed = true
+        }
+        guard changed else { return .unchanged }
+        root["hooks"] = hooks
+        guard let data = try? JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+        else { return .unreadable }
+        let backup = file + ".pre-plum"
+        if manager.fileExists(atPath: file), !manager.fileExists(atPath: backup) { try? manager.copyItem(atPath: file, toPath: backup) }
+        let temporary = file + ".plum-\(UUID().uuidString).tmp"
+        let mode = (try? manager.attributesOfItem(atPath: file)[.posixPermissions] as? Int) ?? 0o600
+        guard manager.createFile(atPath: temporary, contents: data, attributes: [.posixPermissions: mode]) else { return .unreadable }
+        guard rename(temporary, file) == 0 else {
+            unlink(temporary)
+            return .unreadable
+        }
+        return .granted
+    }
+}
+
 /// Listens on a Unix socket for status lines from agent hooks.
 public final class StatusServer {
     public let path: String
