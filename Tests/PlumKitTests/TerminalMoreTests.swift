@@ -4,6 +4,18 @@ import XCTest
 
 @MainActor
 final class TerminalMoreTests: XCTestCase {
+    /// Switching workspaces makes a new view for the tab. Until it is laid out
+    /// it must leave the session's size alone: the program would get a
+    /// terminal of the wrong size, redraw for it, then redraw again (a jump).
+    func testANewViewKeepsTheSizeUntilItIsLaidOut() {
+        let session = TerminalSession(cols: 120, rows: 50)
+        let view = TerminalView(fontName: "", fontSize: 13)
+        view.session = session
+        XCTAssertEqual([session.cols, session.rows], [120, 50])
+        view.setFrameSize(NSSize(width: 400, height: 300))
+        XCTAssertNotEqual([session.cols, session.rows], [120, 50], "laid out: now the view's size")
+    }
+
     func testProgramsCanCopyTextToTheClipboard() {
         var copied: [String] = []
         let original = TerminalSession.copyToClipboard

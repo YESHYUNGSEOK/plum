@@ -54,7 +54,10 @@ public final class TerminalView: NSView, NSTextInputClient {
         scale = Double(NSScreen.main?.backingScaleFactor ?? 2)
         renderer = TerminalRenderer(font: FontSpec(name: fontName, pointSize: fontSize, scale: scale))
         renderer.theme = theme
-        super.init(frame: NSRect(x: 0, y: 0, width: 800, height: 500))
+        // No size until laid out: a stand-in one would resize the session it
+        // is given, and its program would redraw twice (once for it, once for
+        // the real size), a visible jump when switching workspaces.
+        super.init(frame: .zero)
         wantsLayer = true
         layerContentsRedrawPolicy = .duringViewResize
         registerForDraggedTypes([.fileURL, .string])
