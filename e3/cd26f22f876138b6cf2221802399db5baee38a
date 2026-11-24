@@ -1,0 +1,19 @@
+Tests/PlumKitTests/StatusServerSecurityTests.swift
+  s_74ed3cfc6ccc40::t_561b3e60ea50c1 84-133
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e3cd26f22f876138b6cf2221802399db5baee38a",
+  "prompts": {},
+  "sessions": {
+    "s_74ed3cfc6ccc40": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3a39ebac-5654-415f-88af-28724abff585",
+        "model": "claude-fable-5-2"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    }
+  }
+}
