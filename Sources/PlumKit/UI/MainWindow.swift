@@ -762,7 +762,7 @@ final class TerminalAreaController: NSViewController {
         let still = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         if let message {
             let install = update.map { release in
-                (title: LocalizedStringKey("설치…"), run: { [weak model] in
+                (title: LocalizedStringKey("설치"), run: { [weak model] in
                     guard let model else { return }
                     Task { await AppActions.offerUpdate(model, release) }
                 })

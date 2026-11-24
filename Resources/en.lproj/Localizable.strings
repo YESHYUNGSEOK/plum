@@ -297,7 +297,7 @@
 "PR #%lld의 체크를 모두 통과했습니다." = "PR #%lld passed all its checks.";
 "PR #%lld의 체크가 실패했습니다." = "PR #%lld failed a check.";
 "설치하고 다시 시작" = "Install and Restart";
-"설치…" = "Install…";
+"설치" = "Install";
 "업데이트를 내려받는 중…" = "Downloading the update…";
 "업데이트를 설치하지 못했습니다" = "Couldn't Install the Update";
 "내려받은 파일의 서명이 맞지 않아 설치하지 않았습니다." = "The download's signature doesn't match, so it wasn't installed.";

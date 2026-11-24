@@ -286,6 +286,9 @@ struct ToastView: View {
     var isError = true
     var action: (title: LocalizedStringKey, run: () -> Void)?
     var close: () -> Void = {}
+    /// The first line's height (13 pt): the icon and the buttons are
+    /// centred on that line, whatever follows it.
+    private static let line = NSLayoutManager().defaultLineHeight(for: .systemFont(ofSize: 13))
 
     var body: some View {
         if !message.isEmpty {
@@ -293,7 +296,7 @@ struct ToastView: View {
                 Image(systemName: isError ? "exclamationmark.triangle" : "info.circle")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(isError ? Theme.danger : Theme.secondary)
-                    .padding(.top, 1)
+                    .frame(height: Self.line)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 4) {
                     if isError {
@@ -316,6 +319,8 @@ struct ToastView: View {
                 Button(action: close) {
                     Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).frame(width: 20, height: 20).contentShape(Rectangle())
                 }
+                // Clicked anywhere in its 20 pt square; laid out as one line.
+                .padding(.vertical, (Self.line - 20) / 2)
                 .buttonStyle(.plain)
                 .foregroundStyle(Theme.secondary)
                 .accessibilityLabel("알림 닫기")
