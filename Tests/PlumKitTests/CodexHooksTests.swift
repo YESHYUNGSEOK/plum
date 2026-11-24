@@ -52,6 +52,26 @@ final class CodexHooksTests: XCTestCase {
         XCTAssertEqual(CodexHooks.install(file: home.appendingPathComponent("no-codex/hooks.json").path), .missingConfig)
     }
 
+    func testUpdatesLinkedHooksWithoutReplacingTheLink() throws {
+        let target = home.appendingPathComponent("shared-hooks.json")
+        try Data(#"{"hooks": {}}"#.utf8).write(to: target)
+        try FileManager.default.createSymbolicLink(atPath: file, withDestinationPath: target.path)
+
+        XCTAssertEqual(CodexHooks.install(file: file), .granted)
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: file), target.path)
+        let root = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: target)) as? [String: Any])
+        XCTAssertNotNil((root["hooks"] as? [String: Any])?["Stop"])
+    }
+
+    func testLeavesDanglingHooksLinkAlone() throws {
+        let target = home.appendingPathComponent("missing-hooks.json")
+        try FileManager.default.createSymbolicLink(atPath: file, withDestinationPath: target.path)
+
+        XCTAssertEqual(CodexHooks.install(file: file), .unreadable)
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: file), target.path)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
+    }
+
     /// A link to a server socket that is gone stops every later `codex`
     /// ("app server did not become ready"); Plum clears it.
     func testALeftoverServerLinkIsRemoved() throws {

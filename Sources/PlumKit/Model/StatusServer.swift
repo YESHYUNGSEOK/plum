@@ -345,6 +345,9 @@ public enum CodexHooks {
         let manager = FileManager.default
         // No Codex folder, no Codex to tell.
         guard manager.fileExists(atPath: (file as NSString).deletingLastPathComponent) else { return .missingConfig }
+        let resolved = ClaudeTrust.realPath(file)
+        guard resolved != file || (try? manager.destinationOfSymbolicLink(atPath: file)) == nil else { return .unreadable }
+        let file = resolved
         var root: [String: Any] = [:]
         let original = manager.contents(atPath: file)
         if let data = original {
