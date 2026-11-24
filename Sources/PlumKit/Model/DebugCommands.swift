@@ -145,6 +145,10 @@ extension AppModel {
         case "notice": // shows a notice toast (not an error); empty clears it
             notice = argument.isEmpty ? nil : argument
             return "ok"
+        case "update-available": // tag: as if the daily check had found that release (no assets); empty clears it
+            let release = try? JSONSerialization.data(withJSONObject: ["tag_name": argument, "html_url": "https://github.com/YESHYUNGSEOK/plum/releases"])
+            availableUpdate = argument.isEmpty ? nil : release.flatMap { try? JSONDecoder().decode(Updates.Release.self, from: $0) }
+            return "ok"
         case "import-orca": // imports from Orca without asking (its CLI, read-only); the outcome lands in "result"
             guard let cli = OrcaImport.cli() else { return "not installed" }
             debugResult = "pending"
@@ -420,6 +424,7 @@ extension AppModel {
             "result": debugResult,
             "error": errorMessage ?? "",
             "notice": notice ?? "",
+            "update": availableUpdate?.tag ?? "",
             "selection": selectedWorkspace?.name ?? "",
             "sheet": sheet?.id ?? "",
             "selectionProject": selectedWorkspace.flatMap { project($0.projectID)?.name } ?? "",

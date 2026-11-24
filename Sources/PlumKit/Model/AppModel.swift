@@ -93,6 +93,9 @@ public final class AppModel {
     /// How something is going (an update downloading): the same toast as
     /// `errorMessage`, not marked as a problem.
     public var notice: String?
+    /// A newer release the daily check found: a toast offers it until it is
+    /// dismissed or installed.
+    public var availableUpdate: Updates.Release?
     public var sheet: AppSheet?
     /// Each project's own icon from its repository (ProjectIcon), if it has one.
     public private(set) var projectIcons: [UUID: NSImage] = [:]

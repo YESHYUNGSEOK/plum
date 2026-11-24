@@ -279,10 +279,12 @@ final class StatusMarkView: NSView {
 }
 
 /// An error, or how something is going (`isError` false), shown at the
-/// bottom of the panel without blocking anything. Its controller slides it in and out.
+/// bottom of the panel without blocking anything; `action`, a button beside
+/// the message (an update to install). Its controller slides it in and out.
 struct ToastView: View {
     var message = ""
     var isError = true
+    var action: (title: LocalizedStringKey, run: () -> Void)?
     var close: () -> Void = {}
 
     var body: some View {
@@ -304,6 +306,13 @@ struct ToastView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 0)
+                if let action {
+                    Button(action.title, action: action.run)
+                        .buttonStyle(.plain)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.accent)
+                        .fixedSize()
+                }
                 Button(action: close) {
                     Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).frame(width: 20, height: 20).contentShape(Rectangle())
                 }

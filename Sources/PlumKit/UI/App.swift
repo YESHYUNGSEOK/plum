@@ -1,6 +1,5 @@
 import AppKit
 import Observation
-import UserNotifications
 
 /// Starts Plum. Never returns.
 @MainActor
@@ -19,8 +18,7 @@ public func runApp() {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuItemValidation, UNUserNotificationCenterDelegate,
-    NSUserNotificationCenterDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuItemValidation, NSUserNotificationCenterDelegate {
     private let model = AppModel()
     /// Keeps macOS from putting Plum to sleep (App Nap) while its window is
     /// covered: the terminals behind it keep running agents and builds, and
@@ -30,10 +28,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var awake: NSObjectProtocol?
     private var windowController: MainWindowController!
     private let debug = ProcessInfo.processInfo.environment["PLUM_DEBUG"] == "1"
-    /// Notifications need a real app bundle; a bare `swift run` binary has none.
-    private var notifications: UNUserNotificationCenter? {
-        Bundle.main.bundleIdentifier == nil ? nil : .current()
-    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Read off the main thread while the window is set up (2 ms), not at the first frame.
@@ -57,11 +51,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
         windowController = MainWindowController(model: model)
         windowController.window?.delegate = self
-        // Once a day at most, and silent unless there is something newer.
-        let lastCheck = UserDefaults.standard.double(forKey: "lastUpdateCheck")
-        if !debug, Date().timeIntervalSince1970 - lastCheck > 86400 {
-            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "lastUpdateCheck")
-            Task { await AppActions.checkForUpdates(model, quietly: true) }
+        // Once a day at most, at launch and while Plum stays open (for days,
+        // often); silent unless there is something newer, then a toast.
+        if !debug {
+            checkForUpdatesDaily()
+            Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.checkForUpdatesDaily() }
+            }
         }
         model.debugWindowNumber = { [weak self] in self?.windowController.window?.windowNumber ?? 0 }
         model.debugTerminalView = { [weak self] in self?.currentArea.terminal }
@@ -80,7 +76,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             }
         }
         model.notify = { [weak self] title, body, tab in self?.post(title: title, body: body, tab: tab) }
-        notifications?.delegate = self
         // The Dock badge needs no permission, unlike notifications.
         updateBadge()
         model.start(debug: debug)
@@ -98,6 +93,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             NSApp.activate(ignoringOtherApps: true)
         }
         windowController.focusTerminal()
+    }
+
+    private func checkForUpdatesDaily() {
+        guard Date().timeIntervalSince1970 - UserDefaults.standard.double(forKey: "lastUpdateCheck") > 86400 else { return }
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "lastUpdateCheck")
+        Task { await AppActions.checkForUpdates(model, quietly: true) }
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
@@ -192,38 +193,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
     }
 
+    /// Through the older API only. macOS refuses the current one
+    /// (UNUserNotificationCenter) to apps without an Apple-issued certificate,
+    /// as bundle.sh's ad-hoc builds are; and while Plum had it open, usernoted
+    /// refused the older one too ("You can't mix modern clients with legacy
+    /// clients", macOS 26), so no notification ever showed. The older one
+    /// shows them under Plum's name but without its icon.
+    /// ponytail: deprecated API, until Plum is signed with a Developer ID.
+    @available(macOS, deprecated: 11)
     private func post(title: String, body: String, tab: UUID) {
-        // Always works, even where notifications are refused (macOS turns
-        // them down for builds without a Developer ID signature).
+        // Always works, even where notifications are refused.
         NSApp.requestUserAttention(.informationalRequest)
-        guard let notifications else {
+        // Notifications need a real app bundle; a bare `swift run` binary has none.
+        guard Bundle.main.bundleIdentifier != nil else {
             notificationLog.append("no bundle")
             return
         }
-        notifications.requestAuthorization(options: [.alert, .sound]) { granted, error in
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated {
-                    self.notificationLog.append(granted ? "posted: \(title)" : "not allowed\(error.map { " (\($0.localizedDescription))" } ?? "")")
-                    if !granted { self.postLegacy(title: title, body: body, tab: tab) }
-                }
-            }
-            guard granted else { return }
-            let content = UNMutableNotificationContent()
-            content.title = title
-            content.body = body
-            content.sound = .default
-            content.userInfo = ["tab": tab.uuidString]
-            // One notification per tab: a newer state replaces the older one.
-            notifications.add(UNNotificationRequest(identifier: tab.uuidString, content: content, trigger: nil))
-        }
-    }
-
-    /// macOS refuses the current API to apps without an Apple-issued
-    /// certificate (ad-hoc and self-signed builds, as bundle.sh makes; checked
-    /// on macOS 26). The older one still shows them, under Plum's name but
-    /// without its icon. ponytail: deprecated API; a signed build takes the path above.
-    @available(macOS, deprecated: 11)
-    private func postLegacy(title: String, body: String, tab: UUID) {
         let center = NSUserNotificationCenter.default
         center.delegate = self
         // A newer state replaces the older one. Not through `identifier`: a
@@ -237,15 +222,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         note.informativeText = body
         note.soundName = NSUserNotificationDefaultSoundName
         center.deliver(note)
-        notificationLog.append("posted (legacy): \(title)")
-    }
-
-    // Shown even while Plum is in front: they are about tabs out of sight.
-    nonisolated func userNotificationCenter(
-        _ center: UNUserNotificationCenter, willPresent notification: UNNotification,
-        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
-    ) {
-        completionHandler([.banner, .sound])
+        notificationLog.append("posted: \(title)")
     }
 
     @available(macOS, deprecated: 11)
@@ -263,23 +240,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 self.showMainWindow()
                 self.model.reveal(tab: id)
             }
-        }
-    }
-
-    nonisolated func userNotificationCenter(
-        _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
-        withCompletionHandler completionHandler: @escaping () -> Void
-    ) {
-        let tab = (response.notification.request.content.userInfo["tab"] as? String).flatMap(UUID.init)
-        DispatchQueue.main.async {
-            MainActor.assumeIsolated {
-                if let tab {
-                    NSApp.activate(ignoringOtherApps: true)
-                    self.showMainWindow()
-                    self.model.reveal(tab: tab)
-                }
-            }
-            completionHandler()
         }
     }
 
