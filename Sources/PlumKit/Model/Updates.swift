@@ -95,9 +95,10 @@ public enum Updates {
     public static func newer(than version: String = current) async throws -> Release? {
         var request = URLRequest(url: latest, timeoutInterval: 10)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
         // A private repository looks the same as one with no release.
         if (response as? HTTPURLResponse)?.statusCode == 404 { throw NoRelease() }
+        let data = try await collect(bytes, expectedLength: response.expectedContentLength, limit: 1024 * 1024)
         let release = try JSONDecoder().decode(Release.self, from: data)
         // Only GitHub's own pages are opened, whatever the answer says.
         guard release.page.scheme == "https", release.page.host == "github.com" else { return nil }
@@ -140,15 +141,26 @@ public enum Updates {
     /// Downloads, checks and swaps in `release`; returns where the new app is.
     public static func install(_ release: Release, app: URL = Bundle.main.bundleURL) async throws -> URL {
         guard let archive = release.archive else { throw InstallError.noArchive }
-        let zip = try await download(archive.zip)
-        let signature = try await download(archive.signature)
+        let signature = try await download(archive.signature, limit: 4 * 1024)
+        let zip = try await download(archive.zip, limit: 64 * 1024 * 1024)
         return try install(zip, signature: signature, version: release.version, app: app)
     }
 
     /// A failed download (rate limit, outage) is not a bad signature.
-    private static func download(_ url: URL) async throws -> Data {
-        let (data, response) = try await URLSession.shared.data(from: url)
+    private static func download(_ url: URL, limit: Int) async throws -> Data {
+        let (bytes, response) = try await URLSession.shared.bytes(from: url)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw InstallError.download }
+        return try await collect(bytes, expectedLength: response.expectedContentLength, limit: limit)
+    }
+
+    static func collect<Bytes: AsyncSequence>(_ bytes: Bytes, expectedLength: Int64, limit: Int) async throws -> Data where Bytes.Element == UInt8 {
+        guard expectedLength < 0 || expectedLength <= limit else { throw InstallError.download }
+        var data = Data()
+        if expectedLength > 0 { data.reserveCapacity(Int(expectedLength)) }
+        for try await byte in bytes {
+            guard data.count < limit else { throw InstallError.download }
+            data.append(byte)
+        }
         return data
     }
 

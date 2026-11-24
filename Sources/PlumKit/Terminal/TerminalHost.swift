@@ -1,6 +1,7 @@
 import CPty
 import Foundation
 import GhosttyVt
+import Security
 
 /// The process that keeps terminals alive while Plum isn't running.
 ///
@@ -22,11 +23,12 @@ import GhosttyVt
 public final class TerminalHost {
     /// Bumped whenever the protocol or what the host does changes: a host
     /// started by an older Plum keeps its own socket and its own terminals.
-    public static let version = 1
+    public static let version = 3
 
     private let socketPath: String
     private let lock = NSLock()
     private var sessions: [String: HostSession] = [:]
+    private var connectedClients = 0
     private var lastActivity = Date()
 
     public init(socketPath: String) {
@@ -37,6 +39,14 @@ public final class TerminalHost {
     /// folder (a socket path must stay under 104 bytes), named after the
     /// store so a test instance never reaches the user's terminals.
     public static func socketPath(for store: Store) -> String {
+        socketPath(for: store, version: version)
+    }
+
+    public static func legacySocketPath(for store: Store) -> String {
+        socketPath(for: store, version: 1)
+    }
+
+    private static func socketPath(for store: Store, version: Int) -> String {
         var hash: UInt64 = 0xCBF2_9CE4_8422_2325 // FNV-1a: the same every launch, unlike hashValue
         for byte in store.directory.standardizedFileURL.path.utf8 {
             hash = (hash ^ UInt64(byte)) &* 0x100_0000_01B3
@@ -46,47 +56,77 @@ public final class TerminalHost {
 
     /// Runs the host until it has had no terminals for a minute.
     public static func run(socketPath: String) -> Never {
+        guard sameCode(as: getppid()) else { exit(1) }
         signal(SIGPIPE, SIG_IGN) // a vanished app is noticed by its writes failing
         signal(SIGHUP, SIG_IGN)
         let host = TerminalHost(socketPath: socketPath)
         do { try host.listen() } catch { exit(1) }
         while true {
             sleep(15)
-            if host.idle(for: 60) { unlink(socketPath); exit(0) }
+            if host.idle(for: 60) { exit(0) }
         }
     }
 
-    private func idle(for seconds: TimeInterval) -> Bool {
+    func idle(for seconds: TimeInterval) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        return sessions.isEmpty && Date().timeIntervalSince(lastActivity) > seconds
+        return sessions.isEmpty && connectedClients == 0 && Date().timeIntervalSince(lastActivity) > seconds
     }
 
     /// Starts accepting connections on a thread of its own.
     public func listen() throws {
-        let server = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard server >= 0 else { throw POSIXError(.EIO) }
-        _ = fcntl(server, F_SETFD, FD_CLOEXEC)
-        unlink(socketPath)
         var address = sockaddr_un()
         address.sun_family = sa_family_t(AF_UNIX)
         guard socketPath.utf8.count < MemoryLayout.size(ofValue: address.sun_path) else { throw POSIXError(.ENAMETOOLONG) }
         withUnsafeMutableBytes(of: &address.sun_path) { raw in
             socketPath.withCString { _ = strcpy(raw.baseAddress!.assumingMemoryBound(to: CChar.self), $0) }
         }
+        let lockFD = open(socketPath + ".lock", O_CREAT | O_RDWR | O_NOFOLLOW, 0o600)
+        guard lockFD >= 0 else { throw POSIXError(.EIO) }
+        guard flock(lockFD, LOCK_EX | LOCK_NB) == 0 else { close(lockFD); throw POSIXError(.EADDRINUSE) }
+        let server = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard server >= 0 else { close(lockFD); throw POSIXError(.EIO) }
+        var listening = false
+        defer {
+            if !listening { close(server); close(lockFD) }
+        }
+        _ = fcntl(server, F_SETFD, FD_CLOEXEC)
+        _ = fcntl(lockFD, F_SETFD, FD_CLOEXEC)
+        var existing = stat()
+        if lstat(socketPath, &existing) == 0 {
+            guard existing.st_mode & S_IFMT == S_IFSOCK else { throw POSIXError(.EEXIST) }
+            let probe = socket(AF_UNIX, SOCK_STREAM, 0)
+            guard probe >= 0 else { throw POSIXError(.EIO) }
+            guard fcntl(probe, F_SETFL, O_NONBLOCK) >= 0 else { close(probe); throw POSIXError(.EIO) }
+            let connected = withUnsafePointer(to: &address) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(probe, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+            }
+            let error = errno
+            close(probe)
+            guard connected != 0, error == ECONNREFUSED else { throw POSIXError(.EADDRINUSE) }
+            guard unlink(socketPath) == 0 else { throw POSIXError(.EIO) }
+        } else if errno != ENOENT {
+            throw POSIXError(.EIO)
+        }
         let previous = umask(0o077) // the terminals are the user's alone
         let bound = withUnsafePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(server, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
         }
         umask(previous)
-        guard bound == 0, Darwin.listen(server, 16) == 0 else { close(server); throw POSIXError(.EADDRINUSE) }
+        guard bound == 0, Darwin.listen(server, 16) == 0 else { throw POSIXError(.EADDRINUSE) }
         let acceptor = Thread { [weak self] in
+            defer { close(server); close(lockFD) }
             while true {
                 let connection = accept(server, nil, nil)
                 if connection < 0 { if errno == EINTR { continue }; return }
                 _ = fcntl(connection, F_SETFD, FD_CLOEXEC)
                 var on: Int32 = 1
                 setsockopt(connection, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+                var timeout = timeval(tv_sec: 2, tv_usec: 0)
+                guard setsockopt(connection, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size)) == 0 else {
+                    close(connection)
+                    continue
+                }
                 Connection.widen(connection)
                 guard let self else { close(connection); return }
                 let handler = Thread { self.serve(Connection(fd: connection)) }
@@ -96,17 +136,38 @@ public final class TerminalHost {
         }
         acceptor.name = "plum.host.accept"
         acceptor.start()
+        listening = true
     }
 
     // MARK: Requests
 
     private func serve(_ connection: Connection) {
+        var authenticated = false
+        defer {
+            if authenticated {
+                lock.lock()
+                connectedClients -= 1
+                lock.unlock()
+            }
+        }
         while let line = connection.readLine() {
             // An agent's hook: `<tab id> <state> [message]`, kept for the app.
             guard let request = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else {
                 if let status = StatusMessage.parse(String(decoding: line, as: UTF8.self)) {
                     session(status.tab.uuidString)?.report(status.status, message: status.message)
                 }
+                return connection.close()
+            }
+            // Only Plum's GUI may control shells; agent hooks send plain status lines.
+            if !authenticated {
+                guard Self.isPlumProcess(connection.fd) else { return connection.close() }
+                authenticated = true
+                lock.lock()
+                connectedClients += 1
+                lock.unlock()
+            }
+            var noTimeout = timeval(tv_sec: 0, tv_usec: 0)
+            guard setsockopt(connection.fd, SOL_SOCKET, SO_RCVTIMEO, &noTimeout, socklen_t(MemoryLayout<timeval>.size)) == 0 else {
                 return connection.close()
             }
             lock.lock()
@@ -147,6 +208,52 @@ public final class TerminalHost {
             }
         }
         connection.close()
+    }
+
+    fileprivate static func isPlumProcess(_ fd: Int32, codeHash: String? = nil) -> Bool {
+        var peer: pid_t = 0
+        var size = socklen_t(MemoryLayout<pid_t>.size)
+        guard getsockopt(fd, SOL_LOCAL, LOCAL_PEERPID, &peer, &size) == 0,
+              size == MemoryLayout<pid_t>.size else { return false }
+        if let codeHash { return matchesCode(as: peer, hash: codeHash, allowReplacedDisk: true) }
+        return sameCode(as: peer)
+    }
+
+    private static func sameCode(as pid: pid_t) -> Bool {
+        let flags = SecCSFlags(rawValue: 0)
+        var owner: SecCode?
+        var staticOwner: SecStaticCode?
+        var information: CFDictionary?
+        guard SecCodeCopySelf(flags, &owner) == errSecSuccess, let owner,
+              SecCodeCopyStaticCode(owner, flags, &staticOwner) == errSecSuccess, let staticOwner,
+              SecCodeCopySigningInformation(staticOwner, flags, &information) == errSecSuccess,
+              let details = information as? [String: Any],
+              let identity = details[kSecCodeInfoUnique as String] as? Data else { return false }
+        let hex = identity.map { String(format: "%02x", $0) }.joined()
+        guard matchesCode(as: getpid(), hash: hex) else { return false }
+        return matchesCode(as: pid, hash: hex)
+    }
+
+    private static func matchesCode(as pid: pid_t, hash: String, allowReplacedDisk: Bool = false) -> Bool {
+        let flags = SecCSFlags(rawValue: 0)
+        var requirement: SecRequirement?
+        guard SecRequirementCreateWithString("cdhash H\"\(hash)\"" as CFString, flags, &requirement) == errSecSuccess,
+              let requirement else { return false }
+        let attributes = [kSecGuestAttributePid as String: NSNumber(value: pid)] as CFDictionary
+        var peer: SecCode?
+        guard SecCodeCopyGuestWithAttributes(nil, attributes, flags, &peer) == errSecSuccess,
+              let peer else { return false }
+        let validity = SecCodeCheckValidity(peer, flags, requirement)
+        if validity == errSecSuccess { return true }
+        // shortcut: the published 0.1.10 host can outlive a replaced bundle; remove after its sessions finish.
+        guard allowReplacedDisk, validity == errSecCSStaticCodeChanged else { return false }
+        var staticPeer: SecStaticCode?
+        var information: CFDictionary?
+        guard SecCodeCopyStaticCode(peer, flags, &staticPeer) == errSecSuccess, let staticPeer,
+              SecCodeCopySigningInformation(staticPeer, flags, &information) == errSecSuccess,
+              let details = information as? [String: Any],
+              let identity = details[kSecCodeInfoUnique as String] as? Data else { return false }
+        return identity.map { String(format: "%02x", $0) }.joined() == hash
     }
 
     private func session(_ id: String) -> HostSession? {
@@ -460,6 +567,7 @@ final class Connection {
     }
 
     func read(count: Int) -> Data? {
+        guard (0...64 * 1024 * 1024).contains(count) else { return nil }
         var data = Data(count: count)
         var offset = 0
         let ok = data.withUnsafeMutableBytes { raw -> Bool in
@@ -518,26 +626,41 @@ public final class TerminalHostClient: @unchecked Sendable {
     }
 
     private let socketPath: String
+    private let expectedVersion: Int
+    private let trustedCodeHash: String?
     /// One connection for requests; terminals get connections of their own.
     private var control: Connection?
+    private var rejectedHost = false
     private let lock = NSLock()
 
     /// Connects to the host for `socketPath`, starting it from `executable`
     /// if none is listening. Nil if it can't be reached.
     public init?(socketPath: String, executable: String) {
         self.socketPath = socketPath
+        expectedVersion = TerminalHost.version
+        trustedCodeHash = nil
         if hello() { return }
+        if rejectedHost { return nil }
         Self.launch(executable: executable, socketPath: socketPath)
-        for _ in 0..<100 { // up to 2 s
+        let deadline = Date().addingTimeInterval(2)
+        while Date() < deadline {
             if hello() { return }
             usleep(20_000)
         }
         return nil
     }
 
+    /// Only reconnects to the known legacy host; never launches one.
+    public init?(legacySocketPath: String, codeHash: String) {
+        socketPath = legacySocketPath
+        expectedVersion = 1
+        trustedCodeHash = codeHash
+        guard hello() else { return nil }
+    }
+
     private func hello() -> Bool {
         guard let reply = request(["op": "hello"]) else { return false }
-        return reply["version"] as? Int == TerminalHost.version
+        return reply["version"] as? Int == expectedVersion
     }
 
     /// Starts the host in a session of its own, so it outlives the app and
@@ -569,10 +692,29 @@ public final class TerminalHostClient: @unchecked Sendable {
         withUnsafeMutableBytes(of: &address.sun_path) { raw in
             socketPath.withCString { _ = strncpy(raw.baseAddress!.assumingMemoryBound(to: CChar.self), $0, raw.count - 1) }
         }
+        let originalFlags = fcntl(fd, F_GETFL)
+        guard originalFlags >= 0, fcntl(fd, F_SETFL, originalFlags | O_NONBLOCK) >= 0 else {
+            Darwin.close(fd)
+            return nil
+        }
         let connected = withUnsafePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
         }
-        guard connected == 0 else { Darwin.close(fd); return nil }
+        if connected != 0 {
+            guard errno == EINPROGRESS else { Darwin.close(fd); return nil }
+            var ready = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+            var error: Int32 = 0
+            var size = socklen_t(MemoryLayout<Int32>.size)
+            guard poll(&ready, 1, 200) > 0,
+                  getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &size) == 0,
+                  error == 0 else { Darwin.close(fd); return nil }
+        }
+        guard fcntl(fd, F_SETFL, originalFlags) >= 0 else { Darwin.close(fd); return nil }
+        guard TerminalHost.isPlumProcess(fd, codeHash: trustedCodeHash) else {
+            rejectedHost = true
+            Darwin.close(fd)
+            return nil
+        }
         return Connection(fd: fd)
     }
 

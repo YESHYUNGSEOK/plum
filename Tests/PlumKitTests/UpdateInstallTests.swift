@@ -28,6 +28,31 @@ final class UpdateInstallTests: XCTestCase {
         XCTAssertFalse(Updates.verify(archive, signature: Data("not base64".utf8), publicKey: publicKey))
     }
 
+    func testDownloadRejectsOversizeBodyEvenWithoutContentLength() async throws {
+        let bytes = AsyncStream<UInt8> { continuation in
+            for byte in Data(repeating: 0x41, count: 17) { continuation.yield(byte) }
+            continuation.finish()
+        }
+        do {
+            _ = try await Updates.collect(bytes, expectedLength: -1, limit: 16)
+            XCTFail("oversize download was accepted")
+        } catch {
+            XCTAssertEqual(error as? Updates.InstallError, .download)
+        }
+    }
+
+    func testDownloadRejectsDeclaredOversizeBeforeReadingBody() async throws {
+        let bytes = AsyncStream<UInt8> { continuation in
+            continuation.finish()
+        }
+        do {
+            _ = try await Updates.collect(bytes, expectedLength: 17, limit: 16)
+            XCTFail("oversize Content-Length was accepted")
+        } catch {
+            XCTAssertEqual(error as? Updates.InstallError, .download)
+        }
+    }
+
     func testTheReleaseNamesThisMacsZipAndItsSignature() throws {
         let json = """
         {"tag_name": "v0.2.0", "html_url": "https://github.com/YESHYUNGSEOK/plum/releases/tag/v0.2.0", "assets": [

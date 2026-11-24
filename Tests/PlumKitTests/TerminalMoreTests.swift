@@ -16,15 +16,12 @@ final class TerminalMoreTests: XCTestCase {
         XCTAssertNotEqual([session.cols, session.rows], [120, 50], "laid out: now the view's size")
     }
 
-    func testProgramsCanCopyTextToTheClipboard() {
-        var copied: [String] = []
-        let original = TerminalSession.copyToClipboard
-        TerminalSession.copyToClipboard = { copied.append($0) }
-        defer { TerminalSession.copyToClipboard = original }
+    func testProgramsCannotChangeTheClipboard() {
+        let before = NSPasteboard.general.changeCount
         let session = TerminalSession(cols: 40, rows: 5)
         session.feed("\u{1b}]52;c;\(Data("복사 됨".utf8).base64EncodedString())\u{7}") // what vim's "+y sends over OSC 52
         RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        XCTAssertEqual(copied, ["복사 됨"])
+        XCTAssertEqual(NSPasteboard.general.changeCount, before)
     }
 
     func testAProgramsOwnLinksAreFound() {

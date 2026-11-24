@@ -32,9 +32,7 @@ int plum_pty_spawn(const char *path, char *const argv[], char *const envp[],
     // command is writing to) would otherwise live on in the shell and every
     // program it starts: a pipe's reader would wait forever for its end.
     for (int fd = STDERR_FILENO + 1; fd < highest; fd++) close(fd);
-    if (cwd && chdir(cwd) != 0) {
-      // Fall through: the shell still starts, in the parent's directory.
-    }
+    if (cwd && chdir(cwd) != 0) _exit(127);
     execve(path, argv, envp);
     _exit(127);
   }

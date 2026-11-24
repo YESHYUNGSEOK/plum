@@ -94,6 +94,101 @@ final class OrcaImportTests: XCTestCase {
             """)
     }
 
+    func testUnsignedAppWithOrcaBundleIDIsNotTrusted() throws {
+        let app = scratch.appendingPathComponent("Orca.app")
+        let contents = app.appendingPathComponent("Contents")
+        try FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
+        try """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.stablyai.orca</string></dict></plist>
+        """.write(to: contents.appendingPathComponent("Info.plist"), atomically: true, encoding: .utf8)
+
+        XCTAssertFalse(OrcaImport.trustedApp(app))
+    }
+
+    func testInstalledOrcaIsTrustedWhenPresent() throws {
+        guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: OrcaImport.bundleID) else {
+            throw XCTSkip("Orca is not installed")
+        }
+
+        XCTAssertTrue(OrcaImport.trustedApp(app))
+        XCTAssertEqual(OrcaImport.cli()?.path, app.appendingPathComponent("Contents/Resources/bin/orca").path)
+    }
+
+    func testOrcaCLICommandDoesNotRedirectImport() async throws {
+        let marker = scratch.appendingPathComponent("redirected")
+        let cli = try fakeCLI("""
+            [ -n "${ORCA_CLI_COMMAND:-}" ] && touch '\(marker.path)'
+            printf '%s' '{"id":"local","ok":true,"result":{"repos":[],"worktrees":[]},"_meta":{}}'
+            """)
+        let old = getenv("ORCA_CLI_COMMAND").map { String(cString: $0) }
+        setenv("ORCA_CLI_COMMAND", marker.path, 1)
+        defer {
+            if let old { setenv("ORCA_CLI_COMMAND", old, 1) } else { unsetenv("ORCA_CLI_COMMAND") }
+        }
+
+        _ = try await OrcaImport.load(cli: cli)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
+    }
+
+    func testOrcaImportDoesNotSourceParentBashEnvironment() async throws {
+        let marker = scratch.appendingPathComponent("bash-env-ran")
+        let startup = scratch.appendingPathComponent("startup.sh")
+        try "touch '\(marker.path)'".write(to: startup, atomically: true, encoding: .utf8)
+        let cli = scratch.appendingPathComponent("orca-bash")
+        try """
+        #!/usr/bin/env bash
+        printf '%s' '{"id":"local","ok":true,"result":{"repos":[],"worktrees":[]},"_meta":{}}'
+        """.write(to: cli, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: cli.path)
+        let old = getenv("BASH_ENV").map { String(cString: $0) }
+        setenv("BASH_ENV", startup.path, 1)
+        defer {
+            if let old { setenv("BASH_ENV", old, 1) } else { unsetenv("BASH_ENV") }
+        }
+
+        _ = try await OrcaImport.load(cli: cli)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
+    }
+
+    func testOrcaImportDoesNotRunBashFromParentPath() async throws {
+        let marker = scratch.appendingPathComponent("foreign-bash-ran")
+        let fakeBash = scratch.appendingPathComponent("bash")
+        try "#!/bin/sh\ntouch '\(marker.path)'\nexec /bin/bash \"$@\"\n".write(to: fakeBash, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeBash.path)
+        let cli = scratch.appendingPathComponent("orca-bash")
+        try """
+        #!/usr/bin/env bash
+        printf '%s' '{"id":"local","ok":true,"result":{"repos":[],"worktrees":[]},"_meta":{}}'
+        """.write(to: cli, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: cli.path)
+        let old = getenv("PATH").map { String(cString: $0) }
+        setenv("PATH", "\(scratch.path):/usr/bin:/bin", 1)
+        defer {
+            if let old { setenv("PATH", old, 1) } else { unsetenv("PATH") }
+        }
+
+        _ = try await OrcaImport.load(cli: cli)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
+    }
+
+    func testOversizedOrcaCatalogIsRejected() async throws {
+        let (repo, _) = try gitRepo()
+        let largeName = String(repeating: "a", count: 16 * 1024 * 1024)
+        let cli = try fakeCLI(
+            repos: repos(#"{"id":"r1","path":"\#(repo)","displayName":"\#(largeName)"}"#),
+            worktrees: worktrees(""))
+
+        do {
+            _ = try await OrcaImport.load(cli: cli)
+            XCTFail("An oversized catalog must not be imported")
+        } catch OrcaImport.Failure.unreadable {
+        }
+    }
+
     /// A repository with one commit and a worktree on `feat/x`.
     private func gitRepo() throws -> (repo: String, worktree: String) {
         let repo = scratch.appendingPathComponent("repo").path

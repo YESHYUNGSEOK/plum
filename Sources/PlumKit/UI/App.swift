@@ -52,7 +52,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             // or touching the user's clipboard.
             TerminalView.openLink = { DebugLog.links.append($0.absoluteString) }
             TerminalView.pasteboard = NSPasteboard(name: NSPasteboard.Name("dev.plum.debug"))
-            TerminalSession.copyToClipboard = { DebugLog.copied.append($0) }
         }
         windowController = MainWindowController(model: model)
         windowController.window?.delegate = self
@@ -84,7 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         notifications?.delegate = self
         // The Dock badge needs no permission, unlike notifications.
         updateBadge()
-        model.start(debug: debug)
+        model.start()
         // Someone coming from Orca: offered once what they had there.
         // (Until it has actually asked: Orca may be off on that launch.)
         if !debug, model.state.projects.isEmpty, !UserDefaults.standard.bool(forKey: AppActions.orcaOfferedKey), OrcaImport.cli() != nil {

@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 /// One line from an agent hook: `<tab id> <state> [message]`, or
 /// `<tab id> stop <json>` with what Claude Code's Stop hook was given.
@@ -181,12 +182,17 @@ public enum ClaudeUsage {
 
     public static func fetch() async -> AgentReport? {
         guard let token = token() else { return nil }
+        return await fetch(token: token, endpoint: endpoint)
+    }
+
+    static func fetch(token: String, endpoint: URL) async -> AgentReport? {
         var request = URLRequest(url: endpoint, timeoutInterval: 10)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
         request.setValue("Plum/\(Updates.current)", forHTTPHeaderField: "User-Agent")
-        guard let (data, response) = try? await URLSession(configuration: .ephemeral).data(for: request),
-              (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        guard let (bytes, response) = try? await URLSession(configuration: .ephemeral).bytes(for: request, delegate: NoRedirects()),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let data = try? await Updates.collect(bytes, expectedLength: response.expectedContentLength, limit: 64 * 1024) else { return nil }
         return parse(data)
     }
 
@@ -223,6 +229,13 @@ public enum ClaudeUsage {
         }
         let folder = environment["CLAUDE_CONFIG_DIR"] ?? (home as NSString).appendingPathComponent(".claude")
         return access(FileManager.default.contents(atPath: (folder as NSString).appendingPathComponent(".credentials.json")))
+    }
+}
+
+private final class NoRedirects: NSObject, URLSessionTaskDelegate {
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest) async -> URLRequest? {
+        nil
     }
 }
 
@@ -372,32 +385,41 @@ public enum CodexHooks {
 /// Listens on a Unix socket for status lines from agent hooks.
 public final class StatusServer {
     public let path: String
+    private let directory: URL
     private let queue = DispatchQueue(label: "plum.status-server")
     private var listener: Int32 = -1
+    private var lockFD: Int32 = -1
+    private var socketIdentity: (device: dev_t, inode: ino_t)?
     private var source: DispatchSourceRead?
     private let onMessage: (UUID, AgentStatus, String) -> Void
     private let onReport: (UUID, AgentReport) -> Void
-    /// Test hook: answers lines starting with "debug ". Runs on the main thread.
-    private let debugHandler: ((String) -> String)?
 
     public init(
         directory: URL,
         onMessage: @escaping (UUID, AgentStatus, String) -> Void,
-        onReport: @escaping (UUID, AgentReport) -> Void = { _, _ in },
-        debugHandler: ((String) -> String)? = nil
+        onReport: @escaping (UUID, AgentReport) -> Void = { _, _ in }
     ) {
-        // sun_path holds 104 bytes; fall back to the per-user temp folder.
+        self.directory = directory
+        // sun_path holds 104 bytes; fall back to a per-store name in the per-user temp folder.
         let preferred = directory.appendingPathComponent("plum.sock").path
-        path = preferred.utf8.count < 100 ? preferred : NSTemporaryDirectory() + "plum.sock"
+        let digest = SHA256.hash(data: Data(directory.standardizedFileURL.path.utf8))
+        let suffix = digest.prefix(12).map { String(format: "%02x", $0) }.joined()
+        path = preferred.utf8.count < 100 ? preferred : NSTemporaryDirectory() + "plum-\(suffix).sock"
         self.onMessage = onMessage
         self.onReport = onReport
-        self.debugHandler = debugHandler
     }
 
     deinit { stop() }
 
     public func start() throws {
-        unlink(path)
+        guard listener < 0 else { throw POSIXError(.EALREADY) }
+        let lockPath = directory.appendingPathComponent("plum.sock.lock").path
+        let heldLock = open(lockPath, O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard heldLock >= 0 else { throw POSIXError(.init(rawValue: errno) ?? .EIO) }
+        defer { if lockFD < 0 { close(heldLock) } }
+        guard flock(heldLock, LOCK_EX | LOCK_NB) == 0 else { throw POSIXError(.EADDRINUSE) }
+        try removeStaleSocket()
+
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw POSIXError(.init(rawValue: errno) ?? .EIO) }
 
@@ -416,11 +438,25 @@ public final class StatusServer {
             }
         }
         umask(previousMask)
-        guard bound == 0, listen(fd, 16) == 0 else {
+        guard bound == 0 else {
             let code = errno
             close(fd)
             throw POSIXError(.init(rawValue: code) ?? .EIO)
         }
+        guard listen(fd, 16) == 0 else {
+            let code = errno
+            close(fd)
+            unlink(path)
+            throw POSIXError(.init(rawValue: code) ?? .EIO)
+        }
+        var details = stat()
+        guard lstat(path, &details) == 0 else {
+            let code = errno
+            close(fd)
+            throw POSIXError(.init(rawValue: code) ?? .EIO)
+        }
+        socketIdentity = (details.st_dev, details.st_ino)
+        lockFD = heldLock
         listener = fd
 
         let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
@@ -433,8 +469,50 @@ public final class StatusServer {
     public func stop() {
         source?.cancel()
         source = nil
-        if listener >= 0 { unlink(path) }
+        if let identity = socketIdentity {
+            var details = stat()
+            if lstat(path, &details) == 0,
+               details.st_dev == identity.device, details.st_ino == identity.inode,
+               (details.st_mode & S_IFMT) == S_IFSOCK {
+                unlink(path)
+            }
+        }
+        socketIdentity = nil
         listener = -1
+        if lockFD >= 0 { close(lockFD); lockFD = -1 }
+    }
+
+    private func removeStaleSocket() throws {
+        var original = stat()
+        guard lstat(path, &original) == 0 else {
+            if errno == ENOENT { return }
+            throw POSIXError(.init(rawValue: errno) ?? .EIO)
+        }
+        guard (original.st_mode & S_IFMT) == S_IFSOCK, original.st_uid == getuid() else {
+            throw POSIXError(.EADDRINUSE)
+        }
+        let probe = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard probe >= 0 else { throw POSIXError(.init(rawValue: errno) ?? .EIO) }
+        defer { close(probe) }
+        _ = fcntl(probe, F_SETFL, O_NONBLOCK)
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        let capacity = MemoryLayout.size(ofValue: address.sun_path)
+        withUnsafeMutablePointer(to: &address.sun_path) { pointer in
+            pointer.withMemoryRebound(to: CChar.self, capacity: capacity) { _ = strlcpy($0, path, capacity) }
+        }
+        let connected = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(probe, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        if connected == 0 || errno != ECONNREFUSED { throw POSIXError(.EADDRINUSE) }
+        var current = stat()
+        guard lstat(path, &current) == 0,
+              current.st_dev == original.st_dev, current.st_ino == original.st_ino else {
+            throw POSIXError(.EADDRINUSE)
+        }
+        guard unlink(path) == 0 else { throw POSIXError(.init(rawValue: errno) ?? .EIO) }
     }
 
     private func acceptOne() {
@@ -459,10 +537,8 @@ public final class StatusServer {
         let text = String(decoding: data, as: UTF8.self)
 
         for line in text.split(separator: "\n").prefix(32).map(String.init) {
-            if line.hasPrefix("debug "), let debugHandler {
-                let reply = DispatchQueue.main.sync { debugHandler(String(line.dropFirst(6))) } + "\n"
-                _ = reply.withCString { write(client, $0, strlen($0)) }
-            } else if let said = AgentReport.parse(line) {
+            if line.hasPrefix("debug ") { continue }
+            if let said = AgentReport.parse(line) {
                 DispatchQueue.main.async { [onReport] in onReport(said.tab, said.report) }
             } else if let message = StatusMessage.parse(line) {
                 DispatchQueue.main.async { [onMessage] in onMessage(message.tab, message.status, message.message) }

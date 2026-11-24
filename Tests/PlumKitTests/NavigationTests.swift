@@ -128,6 +128,165 @@ final class NavigationTests: XCTestCase {
         XCTAssertEqual(reloaded.workspace(order[0])?.name, "base")
     }
 
+    func testSavedTerminalsRemainRecoverableWhenTheHostIsUnavailable() throws {
+        let checkout = directory.appendingPathComponent("checkout")
+        try FileManager.default.createDirectory(at: checkout, withIntermediateDirectories: true)
+        let store = Store(directory: directory.appendingPathComponent("recovery-state"))
+        let project = Project(name: "checkout", path: checkout.path)
+        let saved = SavedTab(id: UUID(), workspace: project.id, title: "running", active: true)
+        var state = AppState()
+        state.projects = [project]
+        state.tabs = [saved]
+        try store.save(state)
+
+        let model = AppModel(store: store)
+        model.select(project.id)
+        XCTAssertNotNil(model.activeTab)
+        XCTAssertEqual(store.load().tabs, [saved])
+        model.activeTab?.session.terminate()
+    }
+
+    func testRestoresLegacyTabsButOpensNewTabsOnTheHardenedHost() throws {
+        let checkout = directory.appendingPathComponent("dual-host-checkout")
+        try FileManager.default.createDirectory(at: checkout, withIntermediateDirectories: true)
+        let store = Store(directory: directory.appendingPathComponent("dual-host-state"))
+        let project = Project(name: "checkout", path: checkout.path)
+        let legacyID = UUID(), secureID = UUID()
+        var state = AppState()
+        state.projects = [project]
+        state.tabs = [SavedTab(id: legacyID, workspace: project.id, title: "legacy", active: true),
+                      SavedTab(id: secureID, workspace: project.id, title: "secure", active: false)]
+        try store.save(state)
+
+        let legacyPath = NSTemporaryDirectory() + "plum-test-legacy-\(UUID().uuidString.prefix(8)).sock"
+        let securePath = NSTemporaryDirectory() + "plum-test-secure-\(UUID().uuidString.prefix(8)).sock"
+        let legacyServer = TerminalHost(socketPath: legacyPath)
+        let secureServer = TerminalHost(socketPath: securePath)
+        try legacyServer.listen()
+        try secureServer.listen()
+        defer { unlink(legacyPath); unlink(securePath) }
+        let legacyClient = try XCTUnwrap(TerminalHostClient(socketPath: legacyPath, executable: "/nonexistent"))
+        let secureClient = try XCTUnwrap(TerminalHostClient(socketPath: securePath, executable: "/nonexistent"))
+        let environment = ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory(), "ZDOTDIR": "/nonexistent"]
+        let legacyShell = try XCTUnwrap(legacyClient.open(id: legacyID, workspace: project.id, shell: "/bin/zsh",
+                                                          cwd: checkout.path, environment: environment, cols: 80, rows: 24, command: nil))
+        let secureShell = try XCTUnwrap(secureClient.open(id: secureID, workspace: project.id, shell: "/bin/zsh",
+                                                          cwd: checkout.path, environment: environment, cols: 80, rows: 24, command: nil))
+        close(legacyShell.fd)
+        close(secureShell.fd)
+        defer {
+            for session in legacyClient.list() { legacyClient.close(session.id) }
+            for session in secureClient.list() { secureClient.close(session.id) }
+        }
+
+        let model = AppModel(store: store)
+        model.restoreTabs(secureHost: secureClient, legacyHost: legacyClient)
+        XCTAssertEqual(Set(model.tabs[project.id, default: []].map(\.id)), Set([legacyID, secureID]))
+        XCTAssertEqual(model.tabs[project.id]?.first(where: { $0.id == legacyID })?.customTitle, "legacy")
+
+        let fresh = try XCTUnwrap(model.openTab(in: project.id))
+        XCTAssertTrue(secureClient.list().contains { $0.id == fresh.id })
+        XCTAssertFalse(legacyClient.list().contains { $0.id == fresh.id })
+    }
+
+    func testNewTabReconnectsTheHardenedHostAfterStartupFailure() throws {
+        let checkout = directory.appendingPathComponent("retry-host-checkout")
+        try FileManager.default.createDirectory(at: checkout, withIntermediateDirectories: true)
+        let store = Store(directory: directory.appendingPathComponent("retry-host-state"))
+        let project = Project(name: "checkout", path: checkout.path)
+        var state = AppState()
+        state.projects = [project]
+        try store.save(state)
+        let securePath = TerminalHost.socketPath(for: store)
+        let secureServer = TerminalHost(socketPath: securePath)
+        try secureServer.listen()
+        defer { unlink(securePath) }
+        let secureClient = try XCTUnwrap(TerminalHostClient(socketPath: securePath, executable: "/nonexistent"))
+        defer { for session in secureClient.list() { secureClient.close(session.id) } }
+
+        let model = AppModel(store: store)
+        model.terminalHostExecutable = "/nonexistent"
+        model.restoreTabs(secureHost: nil, legacyHost: nil)
+        let fresh = try XCTUnwrap(model.openTab(in: project.id))
+
+        XCTAssertTrue(secureClient.list().contains { $0.id == fresh.id })
+    }
+
+    func testMissingLegacyHostDoesNotEraseSavedTabs() throws {
+        let store = Store(directory: directory.appendingPathComponent("missing-legacy-state"))
+        let project = Project(name: "checkout", path: directory.path)
+        let saved = SavedTab(id: UUID(), workspace: project.id, title: "legacy", active: true)
+        let other = SavedTab(id: UUID(), workspace: project.id, title: "other", active: false)
+        var state = AppState()
+        state.projects = [project]
+        state.tabs = [saved, other]
+        let split = SplitNode.split(.horizontal, ratio: 0.5, .pane(saved.id), .pane(other.id))
+        state.splits = [saved.id.uuidString: split]
+        try store.save(state)
+
+        let securePath = NSTemporaryDirectory() + "plum-test-recovery-\(UUID().uuidString.prefix(8)).sock"
+        let secureServer = TerminalHost(socketPath: securePath)
+        try secureServer.listen()
+        defer { unlink(securePath) }
+        let secureClient = try XCTUnwrap(TerminalHostClient(socketPath: securePath, executable: "/nonexistent"))
+        defer { for session in secureClient.list() { secureClient.close(session.id) } }
+
+        let model = AppModel(store: store)
+        model.restoreTabs(secureHost: secureClient, legacyHost: nil)
+
+        XCTAssertEqual(store.load().tabs, [saved, other])
+        XCTAssertEqual(store.load().splits[saved.id.uuidString], split)
+        let fresh = try XCTUnwrap(model.openTab(in: project.id))
+        XCTAssertEqual(Set(store.load().tabs.map(\.id)), Set([saved.id, other.id, fresh.id]))
+        XCTAssertEqual(store.load().splits[saved.id.uuidString], split)
+    }
+
+    func testUnknownWorkspaceDoesNotCloseARunningLegacySession() throws {
+        let store = Store(directory: directory.appendingPathComponent("unknown-workspace-state"))
+        let oldPath = NSTemporaryDirectory() + "plum-test-unknown-\(UUID().uuidString.prefix(8)).sock"
+        let oldServer = TerminalHost(socketPath: oldPath)
+        try oldServer.listen()
+        defer { unlink(oldPath) }
+        let oldClient = try XCTUnwrap(TerminalHostClient(socketPath: oldPath, executable: "/nonexistent"))
+        let id = UUID()
+        let opened = try XCTUnwrap(oldClient.open(id: id, workspace: UUID(), shell: "/bin/zsh", cwd: directory.path,
+                                                  environment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory(), "ZDOTDIR": "/nonexistent"],
+                                                  cols: 80, rows: 24, command: nil))
+        close(opened.fd)
+        defer { oldClient.close(id) }
+
+        let model = AppModel(store: store)
+        model.restoreTabs(secureHost: nil, legacyHost: oldClient)
+        Thread.sleep(forTimeInterval: 0.3)
+
+        XCTAssertTrue(oldClient.list().contains { $0.id == id })
+    }
+
+    func testEmptyHostReplyDoesNotEraseSavedTabs() throws {
+        let store = Store(directory: directory.appendingPathComponent("empty-host-state"))
+        let project = Project(name: "checkout", path: directory.path)
+        let saved = SavedTab(id: UUID(), workspace: project.id, title: "running", active: true)
+        var state = AppState()
+        state.projects = [project]
+        state.tabs = [saved]
+        try store.save(state)
+
+        let securePath = NSTemporaryDirectory() + "plum-test-empty-secure-\(UUID().uuidString.prefix(8)).sock"
+        let legacyPath = NSTemporaryDirectory() + "plum-test-empty-legacy-\(UUID().uuidString.prefix(8)).sock"
+        let secureServer = TerminalHost(socketPath: securePath)
+        let legacyServer = TerminalHost(socketPath: legacyPath)
+        try secureServer.listen()
+        try legacyServer.listen()
+        defer { unlink(securePath); unlink(legacyPath) }
+        let secureClient = try XCTUnwrap(TerminalHostClient(socketPath: securePath, executable: "/nonexistent"))
+        let legacyClient = try XCTUnwrap(TerminalHostClient(socketPath: legacyPath, executable: "/nonexistent"))
+
+        let model = AppModel(store: store)
+        model.restoreTabs(secureHost: secureClient, legacyHost: legacyClient)
+
+        XCTAssertEqual(store.load().tabs, [saved])
+    }
+
     func testSwitcherPutsRecentFirstAndRanksMatches() {
         model.selectWorkspace(at: 1)
         model.selectWorkspace(at: 2)

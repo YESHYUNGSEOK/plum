@@ -46,7 +46,7 @@ public enum Diff {
             else { throw Problem(text: String(localized: "비교할 기준 브랜치를 찾지 못했습니다: \(base)")) }
             from = point
         }
-        let patch = try Git.run(["-c", "core.quotepath=false", "diff", "--no-color", "--no-ext-diff", "-M", from, "--"], in: checkout, timeout: 30)
+        let patch = try Git.run(["-c", "core.quotepath=false", "diff", "--no-color", "--no-ext-diff", "--no-textconv", "-M", from, "--"], in: checkout, timeout: 30)
         var files = parse(patch)
         let untracked = (try? Git.run(["ls-files", "--others", "--exclude-standard", "-z"], in: checkout, timeout: 15)) ?? ""
         for path in untracked.split(separator: "\0").map(String.init).prefix(500) {
@@ -117,7 +117,9 @@ public enum Diff {
     private static func newFile(_ path: String, in checkout: String) -> File {
         var file = File(path: path, isNew: true)
         let url = URL(fileURLWithPath: checkout).appendingPathComponent(path)
-        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe), data.count <= 4 << 20,
+        guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+              values.isRegularFile == true, let size = values.fileSize, size <= 4 << 20,
+              let data = try? Data(contentsOf: url, options: .mappedIfSafe),
               !data.prefix(8000).contains(0), let text = String(data: data, encoding: .utf8) else {
             file.isBinary = true
             return file

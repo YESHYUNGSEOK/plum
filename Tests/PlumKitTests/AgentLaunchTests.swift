@@ -4,8 +4,12 @@ import XCTest
 final class AgentLaunchTests: XCTestCase {
     func testPermissionFlagsFollowOrca() {
         var settings = AppSettings()
-        XCTAssertEqual(settings.agentPermission, .fullAccess)
+        XCTAssertEqual(settings.agentPermission, .own)
         XCTAssertNil(settings.command(for: .terminal))
+        XCTAssertEqual(settings.command(for: .claude), AppSettings.defaultClaudeCommand)
+        XCTAssertEqual(settings.command(for: .codex), "codex")
+
+        settings.agentPermission = .fullAccess
         XCTAssertEqual(settings.command(for: .claude), AppSettings.defaultClaudeCommand + " --dangerously-skip-permissions")
         XCTAssertEqual(settings.command(for: .codex), "codex --dangerously-bypass-approvals-and-sandbox")
 
@@ -26,8 +30,21 @@ final class AgentLaunchTests: XCTestCase {
 
     func testOlderSettingsGetTheDefaults() throws {
         let settings = try JSONDecoder().decode(AppSettings.self, from: Data(#"{"fontSize": 14}"#.utf8))
-        XCTAssertEqual(settings.agentPermission, .fullAccess)
-        XCTAssertTrue(settings.trustWorkspaces)
+        XCTAssertEqual(settings.agentPermission, .own)
+        XCTAssertFalse(settings.trustWorkspaces)
+    }
+
+    func testOldSavedFullAccessDefaultsRequireNewOptIn() throws {
+        var state = try JSONDecoder().decode(AppState.self, from: Data(
+            #"{"settings":{"agentPermission":"full-access","trustWorkspaces":true}}"#.utf8))
+        XCTAssertEqual(state.settings.agentPermission, .own)
+        XCTAssertFalse(state.settings.trustWorkspaces)
+
+        state.settings.agentPermission = .fullAccess
+        state.settings.trustWorkspaces = true
+        let saved = try JSONDecoder().decode(AppState.self, from: JSONEncoder().encode(state))
+        XCTAssertEqual(saved.settings.agentPermission, .fullAccess)
+        XCTAssertTrue(saved.settings.trustWorkspaces)
     }
 
     func testClaudeTrustKeepsTheRestOfTheConfig() throws {

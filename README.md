@@ -84,9 +84,9 @@ To ship a build macOS opens directly, `release.sh` signs with the hardened runti
 
 1. **Add a project** (⌘O): choose a git repository folder. The sidebar shows the project and `main`, its original checkout.
    - A folder that isn't a git repository (one holding several repositories, say) opens as a folder project once you confirm "Open as Folder", as in Orca. Its workspaces are named sets of tabs in that same folder: no worktree, branch, changes or pull requests, and removing one leaves the folder alone.
-   - Coming from Orca: File → Import from Orca… (Orca must be running) adds the repositories and worktrees you had there, with Orca's names. It only reads Orca's list; nothing on disk changes. A first launch with no projects offers it once.
+   - Coming from Orca: File → Import from Orca… (the official signed Orca app must be running) adds the repositories and worktrees you had there, with Orca's names. It only reads Orca's list; nothing on disk changes. A first launch with no projects offers it once.
 2. **Project settings** (the ⋯ next to a project name): what happens when a workspace is made.
-   - Files to copy: files outside git (one glob per line, e.g. `.env*`) copied from the main checkout into each new worktree.
+   - Files to copy: files outside git (one glob per line, e.g. `.env*`) copied from the main checkout into each new worktree. Symbolic links are skipped.
    - Setup command, e.g. `pnpm install`.
 3. **Add a workspace** (⌘N or the + next to a project): type a name in the palette, choose what the first tab starts (Terminal by default, or Claude or Codex) and press Return. Plum makes a worktree and a branch at `<workspace location>/<project>/<name>`, copies the files, and runs `setup command && agent` in the first terminal tab.
    - A name, folder or branch that's taken is reported while the palette is still open.
@@ -145,7 +145,7 @@ In the terminal:
 - ⌘T and the + after the tabs open a shell in the folder the open tab's shell is in (Claude and Codex tabs start at the workspace's top).
 - Reopen Closed Tab ⇧⌘T: a new shell in that folder, with the title it was given. What ran in it doesn't come back.
 - Previous/Next Command ⌘↑ ⌘↓: the zsh integration (Settings, on by default) marks each prompt (OSC 133). Plum's `.zshenv` is read first, puts your ZDOTDIR back, reads your `.zshenv`, and adds only the marking hooks, as Ghostty and VS Code do. Marks start at the second prompt.
-- Programs writing to the clipboard (OSC 52: vim's `"+y`, tmux, over ssh) reach the Mac's clipboard. Text only; requests to read the clipboard are never answered.
+- Terminal programs cannot read or change the Mac clipboard through OSC 52.
 - Links programs make (OSC 8: `ls --hyperlink`, gh…) open with ⌘-click too, and the pointer becomes a hand over a link while ⌘ is down. File links are shown in Finder, not opened (opening could run them).
 - Full Screen ⌃⌘F. Drop a tab on another to move it there.
 - Split panes: Split Right ⌘D, Split Down ⇧⌘D (also on the terminal's right-click menu). The new pane opens in the folder of the one it split and takes the keyboard. Move between panes with ⌘⌥ and an arrow, or a click; drag the line between them to resize. Panes without the keyboard are dimmed; ⌘W closes the one with it. The tab bar shows a split tab once (named for the pane with the keyboard, with the most pressing state of its panes); the sidebar lists every pane. Splits come back after a restart.
@@ -162,12 +162,12 @@ In dialogs Return is the default button and Esc cancels; while a dialog is open,
 - Workspace location: `~/plum/workspaces` by default. "Choose…" picks a folder; only full paths starting with `/` or `~` are taken.
 - Branch prefix: e.g. `dev/`, checked against git's branch-name rules when saved.
 - Claude command: `claude --settings "$PLUM_CLAUDE_SETTINGS"` by default; the settings file is what lets Claude report working, waiting and done. Codex command: `codex`. Emptied, each goes back to its default.
-- Permissions: three choices; the default is Full Access. Full Access adds `--dangerously-skip-permissions` to Claude and `--dangerously-bypass-approvals-and-sandbox` to Codex: every command runs without asking. Auto-Approve adds `--permission-mode auto` and `--approve-for-me`: the agent approves safe actions itself. Agent's Own Settings adds nothing. A command that already has a permission argument (`--permission-mode`, `-s`, `--yolo`…) keeps it.
+- Permissions: three choices; the default is Agent's Own Settings, which adds no permission flag. An older saved Full Access choice is reset once on upgrade and can be selected again. Full Access adds `--dangerously-skip-permissions` to Claude and `--dangerously-bypass-approvals-and-sandbox` to Codex: every command runs without asking. Auto-Approve adds `--permission-mode auto` and `--approve-for-me`: the agent approves safe actions itself. A command that already has a permission argument (`--permission-mode`, `-s`, `--yolo`…) keeps it.
 - Show Changes ⇧⌘E (or click the +/− counts in the sidebar, or right-click a workspace): changed files and a diff with line numbers, either "Uncommitted" or "Whole Branch" (since it left its base branch, uncommitted work included). New files show too; each file draws up to 3000 lines.
 - Create PR (in Show Changes, or right-click a workspace): runs `gh pr create --web` in a new tab; gh asks there where to push, then GitHub's form opens in the browser.
 - Existing worktrees: adding a project brings in the worktrees its repository already has (made by hand or by another tool) as workspaces; later ones with "Import Existing Worktrees" on the project's right-click menu. Nothing on disk changes; worktrees without a branch are left out.
 - Updates: once a day, at launch and while it stays open, Plum asks GitHub for a newer release; when there is one a toast at the bottom right says so; Plum → "Check for Updates…" checks now. The toast's "Install" downloads this Mac's zip, without asking first, checks that its Ed25519 signature (the `.sig` uploaded with it) matches the public key in the app and that the app inside is Plum at that version, swaps it in in one step and opens it again. Terminals and the programs in them carry on. With a signature that doesn't match, a copy running from a place macOS chose, or a folder it can't change, it installs nothing and says why in a toast. While the repository is private there is no release to find.
-- Trusted folders (on by default): before an agent tab opens, its folder is marked trusted for Claude (`hasTrustDialogAccepted` in `~/.claude.json`) and Codex (`[projects."<folder>"] trust_level = "trusted"` in `~/.codex/config.toml`), so a new worktree doesn't stop at "Do you trust this folder?". Claude's file is changed under Claude's own lock (`.claude.json.lock`), read again and swapped in whole; nothing is written when the file is missing or unreadable, and a folder Codex already lists is left as it is.
+- Trusted folders (off by default): a previously saved enabled state is reset once on upgrade and can be enabled again. When enabled, before an agent tab opens, its folder is marked trusted for Claude (`hasTrustDialogAccepted` in `~/.claude.json`) and Codex (`[projects."<folder>"] trust_level = "trusted"` in `~/.codex/config.toml`), so a new worktree doesn't stop at "Do you trust this folder?". Claude's file is changed under Claude's own lock (`.claude.json.lock`), read again and swapped in whole; nothing is written when the file is missing or unreadable, and a folder Codex already lists is left as it is.
 
 The workspace selected last is selected again at the next launch.
 
@@ -260,23 +260,16 @@ Terminal emulation is [libghostty-vt](https://libghostty.tip.ghostty.org/) 1.0.1
 
 UI strings: the Korean in the source is the key, and English is in `Resources/en.lproj/Localizable.strings`. The compiler lists the keys: `swift build -Xswiftc -emit-localized-strings -Xswiftc -emit-localized-strings-path -Xswiftc <folder>`.
 
-### Driving the app from a script
+### Debug automation
 
-Started with `PLUM_DEBUG=1`, the status socket also takes `debug …` commands; `PLUM_STATE_DIR` points it at a state folder of its own.
-
-```sh
-PLUM_DEBUG=1 PLUM_STATE_DIR=/tmp/plum-dev build/Plum.app/Contents/MacOS/Plum &
-printf 'debug state\n' | nc -w 3 -U /tmp/plum-dev/plum.sock
-```
-
-The commands are in `Sources/PlumKit/Model/DebugCommands.swift`. Useful for UI work: `debug hitches start` / `stop` (main-thread stalls over one 120 Hz frame), `debug sheet …` (open and close dialogs), `debug keywin <key code>|<characters>[|<modifier flags>]` (a key press through the real path), `debug click <column>|<row>[|<flags>]`, `debug paste <text>` (uses a private pasteboard), `debug responder`. Quitting doesn't ask in debug runs unless `PLUM_DEBUG_ASK_QUIT=1` is set. A scripted instance keeps its window in the back and never activates itself, so it doesn't disturb someone working on the same Mac.
+The status socket only accepts agent status reports. It does not execute `debug …` commands, including when `PLUM_DEBUG=1`. The UI automation paths in `bench/run.py` need a separate authenticated channel before they can run again. `PLUM_STATE_DIR` still selects an isolated state folder for manual testing.
 
 ## Contributing
 
 Contributions are welcome: bug reports, ideas, documentation and code.
 
 - **Bugs and ideas**: open an issue. For a bug, say what you did, what you expected and what happened, and your macOS version.
-- **Pull requests**: small, focused ones are easiest to review. Run `swift test` first, and if you changed the UI, run the app as above and look. For a bigger change, open an issue first so we can agree on the direction.
+- **Pull requests**: small, focused ones are easiest to review. Run `swift test` first, and if you changed the UI, run the app and look. For a bigger change, open an issue first so we can agree on the direction.
 - **Direction**: what Plum is for, and what it deliberately leaves out, is in chapters 3 and 4 of the design document.
 
 ## License

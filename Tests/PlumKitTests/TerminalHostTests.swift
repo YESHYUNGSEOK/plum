@@ -167,4 +167,193 @@ final class TerminalHostTests: XCTestCase {
     func testAttachingToAnUnknownTerminalFails() {
         XCTAssertNil(client.attach(id: UUID()))
     }
+
+    func testSecondHostCannotReplaceALiveSocket() throws {
+        let id = UUID()
+        _ = try XCTUnwrap(client.open(id: id, workspace: UUID(), shell: "/bin/zsh", cwd: NSTemporaryDirectory(),
+                                      environment: environment, cols: 60, rows: 12, command: "sleep 10"))
+
+        let second = TerminalHost(socketPath: socketPath)
+        XCTAssertThrowsError(try second.listen())
+        let freshClient = try XCTUnwrap(TerminalHostClient(socketPath: socketPath, executable: "/nonexistent"))
+        XCTAssertTrue(freshClient.list().contains { $0.id == id })
+    }
+
+    func testHostDoesNotIdleOutWhileItsClientIsConnected() {
+        XCTAssertFalse(host.idle(for: -1))
+    }
+
+    func testIncompleteRequestDoesNotKeepAConnectionOpen() throws {
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        XCTAssertGreaterThanOrEqual(fd, 0)
+        defer { close(fd) }
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        withUnsafeMutableBytes(of: &address.sun_path) { raw in
+            socketPath.withCString { _ = strcpy(raw.baseAddress!.assumingMemoryBound(to: CChar.self), $0) }
+        }
+        let connected = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+        }
+        XCTAssertEqual(connected, 0)
+        var partial: UInt8 = 123
+        XCTAssertEqual(write(fd, &partial, 1), 1)
+        var timeout = timeval(tv_sec: 4, tv_usec: 0)
+        XCTAssertEqual(setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size)), 0)
+        var byte: UInt8 = 0
+        XCTAssertEqual(read(fd, &byte, 1), 0)
+    }
+
+    func testHostReclaimsStaleSocketAfterCrash() throws {
+        let stalePath = NSTemporaryDirectory() + "plum-stale-host-\(UUID().uuidString.prefix(8)).sock"
+        defer { unlink(stalePath) }
+        let stale = socket(AF_UNIX, SOCK_STREAM, 0)
+        XCTAssertGreaterThanOrEqual(stale, 0)
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        withUnsafeMutableBytes(of: &address.sun_path) { raw in
+            stalePath.withCString { _ = strcpy(raw.baseAddress!.assumingMemoryBound(to: CChar.self), $0) }
+        }
+        let bound = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.bind(stale, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+        }
+        XCTAssertEqual(bound, 0)
+        close(stale)
+
+        let restarted = TerminalHost(socketPath: stalePath)
+        try restarted.listen()
+
+        XCTAssertNotNil(TerminalHostClient(socketPath: stalePath, executable: "/nonexistent"))
+    }
+
+    func testOtherProcessesCannotOpenATerminalThroughTheHostSocket() throws {
+        let id = UUID()
+        let command = Process()
+        command.executableURL = URL(fileURLWithPath: "/bin/sh")
+        command.arguments = ["-c", "printf '%s\\n' '{\"op\":\"open\",\"id\":\"\(id.uuidString)\",\"workspace\":\"\(UUID().uuidString)\",\"shell\":\"/bin/zsh\",\"cwd\":\"/tmp\",\"env\":{\"PATH\":\"/usr/bin:/bin\",\"HOME\":\"/tmp\"},\"cols\":80,\"rows\":24,\"command\":\"sleep 5\"}' | /usr/bin/nc -w 1 -U '\(socketPath)'"]
+        let output = Pipe()
+        command.standardOutput = output
+        try command.run()
+        command.waitUntilExit()
+
+        XCTAssertFalse(String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).contains("\"ok\":true"))
+        XCTAssertFalse(client.list().contains { $0.id == id })
+    }
+
+    func testReplacingAClientsExecutablePathDoesNotImpersonatePlum() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("plum-path-swap-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let executable = directory.appendingPathComponent("client")
+        let source = directory.appendingPathComponent("client.c")
+        try Data("""
+        #include <sys/socket.h>
+        #include <sys/un.h>
+        #include <unistd.h>
+        #include <stdio.h>
+        #include <string.h>
+        int main(int argc, char **argv) {
+            if (argc < 2) return 1;
+            int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+            struct sockaddr_un address = {0};
+            address.sun_family = AF_UNIX;
+            snprintf(address.sun_path, sizeof(address.sun_path), "%s", argv[1]);
+            if (connect(fd, (struct sockaddr *)&address, sizeof(address)) != 0) return 2;
+            write(1, "R", 1);
+            char buffer[4096];
+            ssize_t count = read(0, buffer, sizeof(buffer));
+            if (count > 0) write(fd, buffer, count);
+            shutdown(fd, SHUT_WR);
+            while ((count = read(fd, buffer, sizeof(buffer))) > 0) write(1, buffer, count);
+            close(fd);
+            return 0;
+        }
+        """.utf8).write(to: source)
+        let compiler = Process()
+        compiler.executableURL = URL(fileURLWithPath: "/usr/bin/clang")
+        compiler.arguments = [source.path, "-o", executable.path]
+        try compiler.run()
+        compiler.waitUntilExit()
+        XCTAssertEqual(compiler.terminationStatus, 0)
+        let process = Process()
+        process.executableURL = executable
+        process.arguments = [socketPath]
+        let input = Pipe(), output = Pipe()
+        process.standardInput = input
+        process.standardOutput = output
+        try process.run()
+        defer { if process.isRunning { process.terminate(); process.waitUntilExit() } }
+        XCTAssertEqual(try output.fileHandleForReading.read(upToCount: 1), Data("R".utf8))
+        XCTAssertTrue(process.isRunning)
+
+        var ownerPath = [CChar](repeating: 0, count: 4096)
+        XCTAssertGreaterThan(proc_pidpath(getpid(), &ownerPath, UInt32(ownerPath.count)), 0)
+        try FileManager.default.removeItem(at: executable)
+        try FileManager.default.copyItem(atPath: String(cString: ownerPath), toPath: executable.path)
+        XCTAssertTrue(FileManager.default.contentsEqual(atPath: String(cString: ownerPath), andPath: executable.path))
+        XCTAssertTrue(process.isRunning)
+
+        input.fileHandleForWriting.write(Data("{\"op\":\"hello\"}\n".utf8))
+        input.fileHandleForWriting.closeFile()
+        process.waitUntilExit()
+        let response = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        XCTAssertFalse(response.contains("\"ok\":true"))
+    }
+
+    func testClientDoesNotSendRequestsToAnotherProgramsSocket() throws {
+        let fakeSocket = NSTemporaryDirectory() + "plum-fake-host-\(UUID().uuidString.prefix(8)).sock"
+        let fake = Process()
+        fake.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        fake.arguments = ["-c", "import socket,sys; s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1]); s.listen(1); c,_=s.accept(); c.recv(4096); c.sendall(b'{\"ok\":true,\"version\":1}\\n'); c.close(); s.close()", fakeSocket]
+        try fake.run()
+        defer { fake.terminate(); fake.waitUntilExit(); unlink(fakeSocket) }
+        wait("fake socket is ready") { FileManager.default.fileExists(atPath: fakeSocket) }
+
+        XCTAssertNil(TerminalHostClient(socketPath: fakeSocket, executable: "/nonexistent"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fakeSocket))
+    }
+
+    func testLegacyClientDoesNotStartAMissingHost() {
+        let missing = NSTemporaryDirectory() + "plum-missing-legacy-\(UUID().uuidString).sock"
+        XCTAssertNil(TerminalHostClient(legacySocketPath: missing, codeHash: "b9b3230b9540d5f174d0e60c8729a53ba7cea9a9"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: missing))
+    }
+
+    func testLegacyClientRejectsTheWrongProcess() throws {
+        let fakeSocket = NSTemporaryDirectory() + "plum-fake-legacy-\(UUID().uuidString.prefix(8)).sock"
+        let fake = Process()
+        fake.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        fake.arguments = ["-c", "import socket,sys; s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1]); s.listen(1); c,_=s.accept(); c.recv(4096); c.sendall(b'{\"ok\":true,\"version\":1}\\n'); c.close(); s.close()", fakeSocket]
+        try fake.run()
+        defer { fake.terminate(); fake.waitUntilExit(); unlink(fakeSocket) }
+        wait("fake legacy socket is ready") { FileManager.default.fileExists(atPath: fakeSocket) }
+
+        XCTAssertNil(TerminalHostClient(legacySocketPath: fakeSocket, codeHash: "b9b3230b9540d5f174d0e60c8729a53ba7cea9a9"))
+    }
+
+    func testRunningLegacyHostCanBeListedAfterItsBinaryWasReplacedOnDisk() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let socket = env["PLUM_TEST_LEGACY_SOCKET"] else {
+            throw XCTSkip("requires an isolated or live legacy host")
+        }
+        let legacy = try XCTUnwrap(TerminalHostClient(legacySocketPath: socket,
+                                                      codeHash: "b9b3230b9540d5f174d0e60c8729a53ba7cea9a9"))
+        XCTAssertFalse(legacy.list().isEmpty)
+    }
+
+    func testHardenedHostUsesADifferentSocketFromLegacyHost() {
+        let store = Store(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        XCTAssertTrue(TerminalHost.legacySocketPath(for: store).contains("plum-host-1-"))
+        XCTAssertTrue(TerminalHost.socketPath(for: store).contains("plum-host-3-"))
+        XCTAssertNotEqual(TerminalHost.legacySocketPath(for: store), TerminalHost.socketPath(for: store))
+    }
+
+
+    func testHostRejectsNegativeSnapshotLengthWithoutCrashing() {
+        var descriptors: [Int32] = [0, 0]
+        XCTAssertEqual(socketpair(AF_UNIX, SOCK_STREAM, 0, &descriptors), 0)
+        defer { close(descriptors[0]); close(descriptors[1]) }
+
+        XCTAssertNil(Connection(fd: descriptors[0]).read(count: -1))
+    }
 }

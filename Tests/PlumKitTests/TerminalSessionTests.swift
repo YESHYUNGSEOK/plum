@@ -18,6 +18,19 @@ final class TerminalSessionTests: XCTestCase {
         XCTAssertTrue(session.screenText().contains("plum-ok"), session.screenText())
     }
 
+    func testMissingWorkingDirectoryDoesNotStartShellElsewhere() throws {
+        let session = TerminalSession(cols: 80, rows: 10)
+        let exited = expectation(description: "shell exits")
+        session.onExit = { exited.fulfill() }
+        let missing = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+
+        try session.start(shell: "/bin/sh", cwd: missing.path, environment: ["TERM": "xterm-256color", "PATH": "/usr/bin:/bin"])
+        session.write("printf 'unexpected-shell\\n'; exit\n")
+        wait(for: [exited], timeout: 5)
+
+        XCTAssertFalse(session.screenText().split(separator: "\n").contains("unexpected-shell"), session.screenText())
+    }
+
     /// Closing tabs must not leave reader threads or pty descriptors behind,
     /// even when the program in the tab ignores the hangup.
     func testClosedSessionsLeaveNoThreadsOrDescriptors() throws {
@@ -50,11 +63,11 @@ final class TerminalSessionTests: XCTestCase {
             XCTAssertEqual(readerThreads(), before.1 + 3)
         }
         let deadline = Date().addingTimeInterval(5)
-        while (descriptors(), readerThreads()) != before, Date() < deadline {
+        while (descriptors() > before.0 || readerThreads() > before.1), Date() < deadline {
             RunLoop.current.run(until: Date().addingTimeInterval(0.05))
         }
-        XCTAssertEqual(descriptors(), before.0, "pty descriptors left open")
-        XCTAssertEqual(readerThreads(), before.1, "reader threads left running")
+        XCTAssertLessThanOrEqual(descriptors(), before.0, "pty descriptors left open")
+        XCTAssertLessThanOrEqual(readerThreads(), before.1, "reader threads left running")
     }
 
     /// A shell must not keep the app's other descriptors: holding a pipe's

@@ -37,13 +37,31 @@ public enum Git {
     @discardableResult
     public static func run(_ arguments: [String], in directory: String, timeout: TimeInterval = 60, using tool: URL? = nil,
                            input: String? = nil) throws -> String {
+        let disabled = tool == nil ? disabledConfiguredCommands(in: directory) : []
+        return try execute(disabled + arguments, in: directory, timeout: timeout, using: tool, input: input)
+    }
+
+    private static func disabledConfiguredCommands(in directory: String) -> [String] {
+        let keys = (try? execute(["config", "--includes", "--name-only", "--get-regexp",
+                                  "^(filter\\..*\\.(clean|smudge|process)|merge\\..*\\.driver)$"],
+                                 in: directory, timeout: 5)) ?? ""
+        return Set(keys.split(separator: "\n")).sorted().flatMap { ["-c", "\($0)="] }
+    }
+
+    private static func execute(_ arguments: [String], in directory: String, timeout: TimeInterval,
+                                using tool: URL? = nil, input: String? = nil) throws -> String {
         let process = Process()
         process.executableURL = tool ?? executable
-        process.arguments = arguments
+        process.arguments = tool == nil
+            ? ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "credential.helper="] + arguments
+            : arguments
         process.currentDirectoryURL = URL(fileURLWithPath: directory)
         var environment = ProcessInfo.processInfo.environment
         environment["GIT_TERMINAL_PROMPT"] = "0" // never hang waiting for a password
         environment["GIT_OPTIONAL_LOCKS"] = "0"
+        environment["GIT_SSH_COMMAND"] = "/usr/bin/ssh -o BatchMode=yes"
+        environment["GIT_ALLOW_PROTOCOL"] = "https:ssh:file"
+        environment["GIT_ASKPASS"] = "/usr/bin/false"
         process.environment = environment
         let stdout = Pipe()
         let stderr = Pipe()
@@ -63,23 +81,39 @@ public enum Git {
         }
 
         // Drain both pipes while git runs, or a chatty command fills one and stalls.
-        var errorData = Data()
+        var errorOutput = (data: Data(), exceeded: false)
         let errorReader = DispatchQueue(label: "plum.git.stderr")
-        errorReader.async { errorData = stderr.fileHandleForReading.readDataToEndOfFile() }
+        errorReader.async { errorOutput = readBounded(stderr.fileHandleForReading, limit: 1 << 20) }
         let killer = DispatchWorkItem { if process.isRunning { process.terminate() } }
         DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: killer)
-        let output = stdout.fileHandleForReading.readDataToEndOfFile()
+        let output = readBounded(stdout.fileHandleForReading, limit: 64 << 20)
         exited.wait()
         killer.cancel()
         errorReader.sync {}
 
-        let text = String(decoding: output, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !output.exceeded, !errorOutput.exceeded else {
+            throw GitError(message: String(localized: "git 출력이 너무 큽니다"))
+        }
+        let text = String(decoding: output.data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
         guard process.terminationReason == .exit, process.terminationStatus == 0 else {
-            let detail = String(decoding: errorData, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            let detail = String(decoding: errorOutput.data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
             let reason = process.terminationReason == .uncaughtSignal ? String(localized: "시간 초과 또는 중단됨") : detail
             throw GitError(message: reason.isEmpty ? String(localized: "git \(arguments.first ?? "") 실패") : reason)
         }
         return text
+    }
+
+    private static func readBounded(_ handle: FileHandle, limit: Int) -> (data: Data, exceeded: Bool) {
+        var data = Data()
+        var exceeded = false
+        while true {
+            let chunk = handle.readData(ofLength: 1 << 16)
+            if chunk.isEmpty { break }
+            let remaining = max(0, limit - data.count)
+            data.append(contentsOf: chunk.prefix(remaining))
+            if chunk.count > remaining { exceeded = true }
+        }
+        return (data, exceeded)
     }
 
     /// The top-level directory of the repository containing `path`, if any.
@@ -107,7 +141,7 @@ public enum Git {
     /// What changed in a checkout since its last commit; nil when it can't
     /// tell (no commit yet, not a repository).
     public static func changes(in checkout: String) -> Changes? {
-        guard let numstat = try? run(["diff", "HEAD", "--numstat"], in: checkout, timeout: 15),
+        guard let numstat = try? run(["diff", "--no-ext-diff", "--no-textconv", "HEAD", "--numstat"], in: checkout, timeout: 15),
               let untracked = try? run(["ls-files", "--others", "--exclude-standard", "-z"], in: checkout, timeout: 15)
         else { return nil }
         var changes = Changes()
@@ -121,7 +155,8 @@ public enum Git {
         // ponytail: only the first 200 new text files under 1 MB are read.
         for path in untracked.split(separator: "\0").prefix(200) {
             let url = URL(fileURLWithPath: checkout).appendingPathComponent(String(path))
-            guard let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize, size <= 1 << 20,
+            guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+                  values.isRegularFile == true, let size = values.fileSize, size <= 1 << 20,
                   let data = try? Data(contentsOf: url), !data.prefix(8000).contains(0) else { continue }
             changes.added += data.reduce(0) { $1 == 10 ? $0 + 1 : $0 } + (data.last.map { $0 == 10 ? 0 : 1 } ?? 0)
         }
@@ -151,7 +186,7 @@ public enum Git {
 
     /// Best effort. A failed fetch (offline, no remote) is not an error.
     public static func fetch(in repository: String) {
-        _ = try? run(["fetch", "--quiet", "origin"], in: repository, timeout: 20)
+        _ = try? run(["fetch", "--quiet", "--upload-pack=git-upload-pack", "origin"], in: repository, timeout: 20)
     }
 
     public static func worktrees(in repository: String) -> [Worktree] {
@@ -235,8 +270,8 @@ public enum Git {
                        try? run(["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"], in: repository), "HEAD"] {
             if let target, !target.isEmpty, !target.hasPrefix("-"), !targets.contains(target) { targets.append(target) }
         }
-        let local = targets.filter { $0 == "HEAD" || $0.hasPrefix("refs/heads/") || $0.hasPrefix("refs/tags/") }
         let ref = "refs/heads/\(branch)"
+        let local = targets.filter { $0 == "HEAD" || $0.hasPrefix("refs/heads/") || $0.hasPrefix("refs/tags/") }
         return holds(ref, in: local, repository)
             || holds(ref, in: refreshed(targets.filter { !local.contains($0) }, in: repository), repository)
     }
@@ -249,7 +284,7 @@ public enum Git {
             guard let remote = remotes.first(where: { target.hasPrefix("refs/remotes/\($0)/") }) else { return false }
             let specs = ((try? run(["config", "--get-all", "remote.\(remote).fetch"], in: repository)) ?? "").split(separator: "\n")
             guard let source = specs.lazy.compactMap({ source(of: target, refspec: String($0)) }).first else { return false }
-            return (try? run(["fetch", "--quiet", "--no-tags", remote, "+\(source):\(target)"], in: repository, timeout: 20)) != nil
+            return (try? run(["fetch", "--quiet", "--no-tags", "--upload-pack=git-upload-pack", remote, "+\(source):\(target)"], in: repository, timeout: 20)) != nil
         }
     }
 
@@ -268,10 +303,12 @@ public enum Git {
 
     /// Whether any of `targets` already has the work on `ref`.
     private static func holds(_ ref: String, in targets: [String], _ repository: String) -> Bool {
+        guard let branchCommit = try? run(["rev-parse", "--verify", "--quiet", "\(ref)^{commit}"], in: repository) else { return false }
         for target in targets {
             guard let commit = try? run(["rev-parse", "--verify", "--quiet", "\(target)^{commit}"], in: repository), !commit.isEmpty,
+                  commit != branchCommit,
                   let base = try? run(["merge-base", commit, ref], in: repository), !base.isEmpty else { continue }
-            let files = (try? run(["diff", "--name-only", "--no-renames", base, ref], in: repository)) ?? ""
+            let files = (try? run(["diff", "--no-ext-diff", "--no-textconv", "--name-only", "--no-renames", base, ref], in: repository)) ?? ""
             if files.isEmpty, (try? run(["merge-base", "--is-ancestor", ref, commit], in: repository)) == nil { continue }
             if mergeChangesNothing(ref, into: commit, repository) { return true }
             let merges = Int((try? run(["rev-list", "--right-only", "--merges", "--count", "\(commit)...\(ref)"], in: repository)) ?? "") ?? 0
@@ -308,8 +345,8 @@ public enum Git {
             guard let hash = ids.first else { return nil }
             return ids.count > 2 || fileSet(lines.count > 1 ? lines[1] : "") == wanted ? String(hash) : nil
         }
-        guard let patch = patchID(["diff", base, ref], repository) else { return false }
-        return candidates.contains { patchID(["show", "--format=", $0], repository) == patch && mergeChangesNothing(ref, into: $0, repository) }
+        guard let patch = patchID(["diff", "--no-ext-diff", "--no-textconv", base, ref], repository) else { return false }
+        return candidates.contains { patchID(["show", "--no-ext-diff", "--no-textconv", "--format=", $0], repository) == patch && mergeChangesNothing(ref, into: $0, repository) }
     }
 
     private static func patchID(_ diff: [String], _ repository: String) -> String? {
@@ -373,7 +410,8 @@ public enum GitHub {
             guard let branch = item["headRefName"] as? String, found[branch] == nil,
                   item["isCrossRepository"] as? Bool != true, // a fork's branch of the same name isn't ours
                   let number = item["number"] as? Int,
-                  let url = (item["url"] as? String).flatMap(URL.init(string:)) else { continue }
+                  let url = (item["url"] as? String).flatMap(URL.init(string:)),
+                  url.scheme == "https", url.host == "github.com" else { continue }
             let state: PullRequest.State = switch item["state"] as? String {
             case "MERGED": .merged
             case "CLOSED": .closed

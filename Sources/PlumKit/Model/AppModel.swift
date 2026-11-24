@@ -133,6 +133,11 @@ public final class AppModel {
     /// Keeps terminals running while the app isn't. Nil in tests, and if
     /// it can't be started: tabs then end with the app, as they used to.
     @ObservationIgnored private var host: TerminalHostClient?
+    @ObservationIgnored private var legacyHost: TerminalHostClient?
+    @ObservationIgnored private var legacyTabIDs: Set<UUID> = []
+    @ObservationIgnored private var unrestoredTabs: [SavedTab] = []
+    @ObservationIgnored var terminalHostExecutable = Bundle.main.executablePath
+    private var hasUnrestoredTabs: Bool { !unrestoredTabs.isEmpty }
     @ObservationIgnored private var hookSettingsPath = ""
     /// A folder holding Plum's `.zshenv`, which zsh reads first: see `ShellIntegration`.
     @ObservationIgnored private var zshIntegrationPath = ""
@@ -148,6 +153,7 @@ public final class AppModel {
     public init(store: Store = Store()) {
         self.store = store
         state = store.load()
+        unrestoredTabs = state.tabs
         carryOverAgentCommand()
     }
 
@@ -218,7 +224,7 @@ public final class AppModel {
     }
 
     /// Starts listening for agent hooks. Call once at launch.
-    public func start(debug: Bool = false) {
+    public func start() {
         writeHookSettings()
         let zsh = store.directory.appendingPathComponent("shell/zsh", isDirectory: true)
         if (try? FileManager.default.createDirectory(at: zsh, withIntermediateDirectories: true)) != nil,
@@ -238,20 +244,22 @@ public final class AppModel {
                     self?.toldByStatusLine.insert(tab)
                     self?.take(report, from: .claude, tab: tab)
                 }
-            },
-            debugHandler: debug ? { [weak self] line in
-                MainActor.assumeIsolated { self?.handleDebug(line) ?? "" }
-            } : nil)
+            })
         do {
             try server.start()
             self.server = server
         } catch {
             errorMessage = String(localized: "에이전트 상태 수신을 시작하지 못했습니다: \(error.localizedDescription)")
         }
-        if let executable = Bundle.main.executablePath {
-            host = TerminalHostClient(socketPath: TerminalHost.socketPath(for: store), executable: executable)
+        let secureHost = terminalHostExecutable.flatMap {
+            TerminalHostClient(socketPath: TerminalHost.socketPath(for: store), executable: $0)
         }
-        restoreTabs()
+        let oldHost = TerminalHostClient(legacySocketPath: TerminalHost.legacySocketPath(for: store),
+                                         codeHash: "b9b3230b9540d5f174d0e60c8729a53ba7cea9a9")
+        restoreTabs(secureHost: secureHost, legacyHost: oldHost)
+        if hasUnrestoredTabs, errorMessage == nil {
+            errorMessage = String(localized: "기존 터미널에 연결하지 못했습니다. 저장된 탭 정보는 보존했습니다.")
+        }
         watchTabs()
         for project in state.projects { for workspace in workspaces(in: project) { refreshChanges(workspace.id) } }
         refreshPullRequests()
@@ -493,6 +501,9 @@ public final class AppModel {
         let id = UUID()
         let session = TerminalSession(id: id)
         let tab = makeTab(session, in: workspaceID)
+        if host == nil, let executable = terminalHostExecutable {
+            host = TerminalHostClient(socketPath: TerminalHost.socketPath(for: store), executable: executable)
+        }
         let environment = environment(for: tab, workspace: workspace)
         if let host, let carried = host.open(
             id: id, workspace: workspaceID, shell: Self.loginShell, cwd: folder, environment: environment,
@@ -537,22 +548,24 @@ public final class AppModel {
     /// Attaches to the terminals the host kept while the app was away, in
     /// the order the tabs had, with their titles and which one was open.
     /// A terminal whose workspace is gone is ended.
-    private func restoreTabs() {
-        guard let host else { return }
-        let alive = host.list()
+    func restoreTabs(secureHost: TerminalHostClient?, legacyHost: TerminalHostClient?) {
+        host = secureHost
+        self.legacyHost = legacyHost
+        let sources: [(TerminalHostClient, Bool)] = [(secureHost, false), (legacyHost, true)].compactMap { pair in
+            pair.0.map { ($0, pair.1) }
+        }
+        let alive = sources.flatMap { source in source.0.list().map { ($0, source.0, source.1) } }
         let saved = Dictionary(state.tabs.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let rank = Dictionary(state.tabs.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
         // Saved ones in their order, then any the app never saved (it crashed first).
-        for session in alive.sorted(by: { rank[$0.id, default: .max] < rank[$1.id, default: .max] }) {
-            guard let workspace = workspace(session.workspace), !workspace.isArchived else {
-                host.close(session.id)
-                continue
-            }
-            guard let carried = host.attach(id: session.id) else { continue }
+        for (session, owner, isLegacy) in alive.sorted(by: { rank[$0.0.id, default: .max] < rank[$1.0.id, default: .max] }) {
+            guard let workspace = workspace(session.workspace), !workspace.isArchived else { continue }
+            guard let carried = owner.attach(id: session.id) else { continue }
             let terminal = TerminalSession(id: session.id, cols: carried.cols, rows: carried.rows)
             let tab = makeTab(terminal, in: workspace.id)
             tab.customTitle = saved[session.id]?.title
-            terminal.attach(fd: carried.fd, pid: carried.pid, remote: remote(for: session.id, host: host))
+            terminal.attach(fd: carried.fd, pid: carried.pid, remote: remote(for: session.id, host: owner))
+            if isLegacy { legacyTabIDs.insert(session.id) }
             tabs[workspace.id, default: []].append(tab)
             // Waiting or done while the app was away: still to be seen to.
             if carried.status != .idle {
@@ -561,6 +574,8 @@ public final class AppModel {
             }
             if saved[session.id]?.active == true || activeTabs[workspace.id] == nil { activeTabs[workspace.id] = session.id }
         }
+        let restored = Set(tabs.values.joined().map(\.id))
+        unrestoredTabs = state.tabs.filter { !restored.contains($0.id) }
         // Splits again, with the panes whose terminals came back; a split
         // whose head is gone is headed by its next pane.
         let open = Set(tabs.values.joined().map(\.id))
@@ -577,11 +592,18 @@ public final class AppModel {
     /// Remembers the open tabs, for attaching to them again next time.
     private func saveTabs() {
         let open = tabs.flatMap { workspace, list in
-            list.map { SavedTab(id: $0.id, workspace: workspace, title: $0.customTitle, active: activeTabs[workspace] == $0.id) }
+            list.filter { $0.session.isRemote || !hasUnrestoredTabs }
+                .map { SavedTab(id: $0.id, workspace: workspace, title: $0.customTitle, active: activeTabs[workspace] == $0.id) }
         }
-        let layouts = Dictionary(uniqueKeysWithValues: splits.map { ($0.key.uuidString, $0.value) })
-        guard open != state.tabs || layouts != state.splits else { return }
-        state.tabs = open
+        let openIDs = Set(open.map(\.id))
+        let saved = unrestoredTabs.filter { !openIDs.contains($0.id) } + open
+        var layouts = Dictionary(uniqueKeysWithValues: splits.map { ($0.key.uuidString, $0.value) })
+        let pendingIDs = Set(unrestoredTabs.map(\.id))
+        for (key, node) in state.splits where layouts[key] == nil && node.panes.contains(where: { pendingIDs.contains($0) }) {
+            layouts[key] = node
+        }
+        guard saved != state.tabs || layouts != state.splits else { return }
+        state.tabs = saved
         state.splits = layouts
         save()
     }
@@ -589,10 +611,10 @@ public final class AppModel {
     /// The app is quitting: each terminal's screen goes to the host, which
     /// keeps it, and its program, until the app attaches again.
     public func parkTerminals() {
-        guard let host else { return }
         for tab in tabs.values.joined() where tab.session.isRemote {
             let (screen, received) = tab.session.snapshot()
-            host.park(tab.id, snapshot: screen, received: received, status: statuses[tab.id] ?? .idle)
+            let owner = legacyTabIDs.contains(tab.id) ? legacyHost : host
+            owner?.park(tab.id, snapshot: screen, received: received, status: statuses[tab.id] ?? .idle)
         }
     }
 

@@ -5,6 +5,11 @@ import XCTest
 /// the pull request, and folded projects.
 @MainActor
 final class WorkspaceDetailsTests: XCTestCase {
+    func testPullRequestLinksOnlyOpenGitHubPages() {
+        let json = Data(#"[{"number":7,"state":"OPEN","url":"file:///Applications/Other.app","headRefName":"feature","isCrossRepository":false}]"#.utf8)
+
+        XCTAssertTrue(GitHub.parse(json)?.isEmpty == true)
+    }
     private var directory: URL!
 
     override func setUp() async throws {

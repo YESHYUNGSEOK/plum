@@ -97,10 +97,10 @@ public struct AppSettings: Codable, Equatable {
     /// which Claude reports working, waiting and done.
     public var claudeCommand = AppSettings.defaultClaudeCommand
     public var codexCommand = AppSettings.defaultCodexCommand
-    public var agentPermission = AgentPermission.fullAccess
+    public var agentPermission = AgentPermission.own
     /// Tell Claude and Codex a workspace is trusted before they first open
     /// in it, so they don't stop to ask.
-    public var trustWorkspaces = true
+    public var trustWorkspaces = false
     /// ⌥ sends Esc before the key (Meta) instead of typing macOS's symbols.
     public var optionAsMeta = false
     /// zsh marks its prompts for Plum (⌘↑ and ⌘↓ between commands).
@@ -165,6 +165,7 @@ public struct AppState: Codable, Equatable {
     public var projects: [Project] = []
     public var workspaces: [Workspace] = []
     public var settings = AppSettings()
+    private var securityDefaultsVersion = 1
     /// The workspace selected when the app last ran.
     public var lastSelection: UUID?
     /// The sidebar's width as the user dragged it; nil for the default.
@@ -187,6 +188,10 @@ public struct AppState: Codable, Equatable {
         projects = try container.decodeIfPresent([Project].self, forKey: .projects) ?? []
         workspaces = try container.decodeIfPresent([Workspace].self, forKey: .workspaces) ?? []
         settings = try container.decodeIfPresent(AppSettings.self, forKey: .settings) ?? AppSettings()
+        if (try container.decodeIfPresent(Int.self, forKey: .securityDefaultsVersion) ?? 0) < 1 {
+            settings.agentPermission = .own
+            settings.trustWorkspaces = false
+        }
         lastSelection = try container.decodeIfPresent(UUID.self, forKey: .lastSelection)
         sidebarWidth = try container.decodeIfPresent(Double.self, forKey: .sidebarWidth)
         collapsedProjects = try container.decodeIfPresent(Set<UUID>.self, forKey: .collapsedProjects) ?? []
@@ -212,7 +217,19 @@ public struct Store {
             self.directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent("dev.plum.Plum")
         }
-        try? FileManager.default.createDirectory(at: self.directory, withIntermediateDirectories: true)
+        do { try Self.makePrivateDirectory(self.directory) }
+        catch {
+            fatalError("Plum state directory must be private: \(error)")
+        }
+    }
+
+    static func makePrivateDirectory(_ directory: URL) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
+                                                attributes: [.posixPermissions: 0o700])
+        let directoryFD = open(directory.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+        guard directoryFD >= 0 else { throw POSIXError(.init(rawValue: errno) ?? .EIO) }
+        defer { close(directoryFD) }
+        guard fchmod(directoryFD, 0o700) == 0 else { throw POSIXError(.init(rawValue: errno) ?? .EIO) }
     }
 
     private var stateFile: URL { directory.appendingPathComponent("state.json") }
@@ -223,8 +240,9 @@ public struct Store {
             return try JSONDecoder().decode(AppState.self, from: data)
         } catch {
             // Never overwrite a file we couldn't read: keep it for recovery.
-            let backup = directory.appendingPathComponent("state.corrupt-\(Int(Date().timeIntervalSince1970)).json")
-            try? FileManager.default.moveItem(at: stateFile, to: backup)
+            let backup = directory.appendingPathComponent("state.corrupt-\(UUID().uuidString).json")
+            do { try FileManager.default.moveItem(at: stateFile, to: backup) }
+            catch { fatalError("Plum could not preserve unreadable state: \(error)") }
             return AppState()
         }
     }
@@ -272,7 +290,7 @@ public enum WorkspaceNaming {
         guard let projectFolder = folderName(for: project), let workspaceFolder = folderName(for: workspace) else { return nil }
         let base = URL(fileURLWithPath: (root as NSString).expandingTildeInPath).standardizedFileURL
         let path = base.appendingPathComponent(projectFolder).appendingPathComponent(workspaceFolder).standardizedFileURL
-        guard path.path.hasPrefix(base.path + "/") else { return nil }
+        guard WorkspaceService.canonical(path.path).hasPrefix(WorkspaceService.canonical(base.path) + "/") else { return nil }
         return path.path
     }
 }
@@ -285,6 +303,7 @@ public enum WorkspaceFiles {
     public static func copy(patterns: [String], from source: String, to destination: String) -> (copied: [String], rejected: [String]) {
         let fileManager = FileManager.default
         let sourceRoot = URL(fileURLWithPath: source).resolvingSymlinksInPath().path
+        let destinationRoot = WorkspaceService.canonical(destination)
         var copied: [String] = []
         var rejected: [String] = []
 
@@ -305,10 +324,13 @@ public enum WorkspaceFiles {
                 // A symlink inside the repository may point anywhere; only
                 // copy what really lives under it.
                 let resolved = URL(fileURLWithPath: match).resolvingSymlinksInPath().path
-                guard resolved.hasPrefix(sourceRoot + "/"), match.hasPrefix(sourceRoot + "/") else { continue }
+                guard resolved == URL(fileURLWithPath: match).standardizedFileURL.path,
+                      resolved.hasPrefix(sourceRoot + "/"), match.hasPrefix(sourceRoot + "/") else { continue }
                 let relative = String(match.dropFirst(sourceRoot.count + 1))
                 guard relative != ".git", !relative.hasPrefix(".git/") else { continue }
                 let target = URL(fileURLWithPath: destination).appendingPathComponent(relative)
+                let parent = WorkspaceService.canonical(target.deletingLastPathComponent().path)
+                guard parent == destinationRoot || parent.hasPrefix(destinationRoot + "/") else { continue }
                 guard !fileManager.fileExists(atPath: target.path) else { continue }
                 try? fileManager.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
                 if (try? fileManager.copyItem(atPath: match, toPath: target.path)) != nil { copied.append(relative) }

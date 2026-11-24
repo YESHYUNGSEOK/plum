@@ -52,9 +52,9 @@ final class TabProgramTests: XCTestCase {
         let model = AppModel(store: Store(directory: directory))
         var project = model.state.projects[0]
         XCTAssertEqual(model.firstCommand(for: project, program: .terminal), "pnpm install")
-        XCTAssertEqual(model.firstCommand(for: project, program: .claude), "pnpm install && " + AppSettings.defaultClaudeCommand + " --dangerously-skip-permissions")
+        XCTAssertEqual(model.firstCommand(for: project, program: .claude), "pnpm install && " + AppSettings.defaultClaudeCommand)
         project.setupCommand = ""
-        XCTAssertEqual(model.firstCommand(for: project, program: .codex), "codex --dangerously-bypass-approvals-and-sandbox")
+        XCTAssertEqual(model.firstCommand(for: project, program: .codex), "codex")
         XCTAssertEqual(model.firstCommand(for: project, program: .terminal), "")
     }
 }

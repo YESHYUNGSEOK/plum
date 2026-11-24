@@ -202,7 +202,7 @@ enum AppActions {
 
     static func importFromOrca(_ model: AppModel, quietly: Bool, cli: URL? = OrcaImport.cli()) async {
         guard let cli else {
-            if !quietly { model.errorMessage = String(localized: "Orca가 설치되어 있지 않습니다.") }
+            if !quietly { model.errorMessage = String(localized: "공식 서명된 Orca 앱을 찾지 못했습니다.") }
             return
         }
         let catalog: OrcaImport.Catalog

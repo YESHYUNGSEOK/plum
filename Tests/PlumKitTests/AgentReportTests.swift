@@ -108,6 +108,46 @@ final class AgentReportTests: XCTestCase {
         XCTAssertNil(ClaudeUsage.parse(Data("rate limited".utf8)))
     }
 
+    func testClaudeUsageDoesNotFollowRedirects() async throws {
+        let marker = FileManager.default.temporaryDirectory.appendingPathComponent("plum-usage-redirect-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: marker) }
+        let script = """
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+        import sys
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path == '/start':
+                    self.send_response(302)
+                    self.send_header('Location', '/redirected')
+                    self.end_headers()
+                else:
+                    open(sys.argv[1], 'w').write(self.headers.get('Authorization', ''))
+                    self.send_response(200)
+                    self.end_headers()
+                    self.wfile.write(b'{"five_hour":null,"seven_day":null}')
+            def log_message(self, *args):
+                pass
+        server = HTTPServer(('127.0.0.1', 0), Handler)
+        print(server.server_port, flush=True)
+        server.serve_forever()
+        """
+        let server = Process()
+        let output = Pipe()
+        server.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        server.arguments = ["-u", "-c", script, marker.path]
+        server.standardOutput = output
+        server.standardError = FileHandle.nullDevice
+        try server.run()
+        defer { server.terminate(); server.waitUntilExit() }
+        let port = try XCTUnwrap(Int(String(decoding: output.fileHandleForReading.availableData, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)))
+        let endpoint = try XCTUnwrap(URL(string: "http://127.0.0.1:\(port)/start"))
+
+        let report = await ClaudeUsage.fetch(token: "test-token", endpoint: endpoint)
+
+        XCTAssertNil(report)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
+    }
+
     @MainActor
     func testNotificationTitlesAreMarkedByWhatHappened() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("plum-marks-\(UUID().uuidString)")

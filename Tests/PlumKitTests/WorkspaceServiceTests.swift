@@ -47,6 +47,37 @@ final class WorkspaceServiceTests: XCTestCase {
         XCTAssertThrowsError(try Git.run(["rev-parse", "--abbrev-ref", "@{upstream}"], in: ws.path))
     }
 
+    func testCopyDoesNotFollowSymlinkedDestinationDirectory() throws {
+        let source = sandbox.appendingPathComponent("copy-source")
+        let destination = sandbox.appendingPathComponent("copy-destination")
+        let outside = sandbox.appendingPathComponent("outside")
+        for folder in [source.appendingPathComponent("config"), destination, outside] {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        }
+        try "secret".write(to: source.appendingPathComponent("config/secret.txt"), atomically: true, encoding: .utf8)
+        try FileManager.default.createSymbolicLink(at: destination.appendingPathComponent("config"), withDestinationURL: outside)
+
+        let copied = WorkspaceFiles.copy(patterns: ["config/*.txt"], from: source.path, to: destination.path)
+
+        XCTAssertTrue(copied.copied.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: outside.appendingPathComponent("secret.txt").path))
+    }
+
+    func testCopySkipsSourceSymlinkToMainCheckout() throws {
+        let source = sandbox.appendingPathComponent("copy-source")
+        let destination = sandbox.appendingPathComponent("copy-destination")
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        let original = source.appendingPathComponent("secret.txt")
+        try "secret".write(to: original, atomically: true, encoding: .utf8)
+        try FileManager.default.createSymbolicLink(at: source.appendingPathComponent("shared.txt"), withDestinationURL: original)
+
+        let copied = WorkspaceFiles.copy(patterns: ["shared.txt"], from: source.path, to: destination.path)
+
+        XCTAssertTrue(copied.copied.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.appendingPathComponent("shared.txt").path))
+    }
+
     func testCreateRejectsDuplicatesAndBadNames() throws {
         let first = try create("feature").workspace
         XCTAssertThrowsError(try create("feature", existing: [first]))
@@ -254,6 +285,16 @@ final class WorkspaceServiceTests: XCTestCase {
         XCTAssertEqual(WorkspaceNaming.worktreePath(root: "/tmp/r", project: "p", workspace: "w"), "/tmp/r/p/w")
     }
 
+    func testWorkspacePathRejectsSymlinkedProjectDirectory() throws {
+        let workspaces = sandbox.appendingPathComponent("workspaces")
+        let outside = sandbox.appendingPathComponent("outside")
+        try FileManager.default.createDirectory(at: workspaces, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: workspaces.appendingPathComponent("repo"), withDestinationURL: outside)
+
+        XCTAssertNil(WorkspaceNaming.worktreePath(root: workspaces.path, project: "repo", workspace: "feature"))
+    }
+
     func testTabTitle() {
         XCTAssertEqual(TabTitle.display("dev@macbook:~/work/shop-web", shell: "zsh"), "zsh")
         XCTAssertEqual(TabTitle.display("", shell: "zsh"), "zsh")
@@ -307,5 +348,45 @@ final class WorkspaceServiceTests: XCTestCase {
         XCTAssertEqual(store.load(), AppState())
         let files = try FileManager.default.contentsOfDirectory(atPath: store.directory.path)
         XCTAssertTrue(files.contains { $0.hasPrefix("state.corrupt-") }, "\(files)")
+    }
+
+    func testStoreProtectsExistingStateDirectory() throws {
+        let directory = sandbox.appendingPathComponent("state")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory.path)
+
+        _ = Store(directory: directory)
+
+        XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: directory.path)[.posixPermissions] as? Int, 0o700)
+    }
+
+    func testStoreRejectsSymlinkWithoutChangingItsTargetPermissions() throws {
+        let target = sandbox.appendingPathComponent("other-app")
+        let link = sandbox.appendingPathComponent("state-link")
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: target.path)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+
+        XCTAssertThrowsError(try Store.makePrivateDirectory(link))
+        XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: target.path)[.posixPermissions] as? Int, 0o755)
+    }
+
+    func testCorruptStateIsPreservedWhenTimestampedBackupAlreadyExists() throws {
+        let store = Store(directory: sandbox.appendingPathComponent("state"))
+        for second in -1...1 {
+            let stamp = Int(Date().timeIntervalSince1970) + second
+            try "older".write(to: store.directory.appendingPathComponent("state.corrupt-\(stamp).json"),
+                              atomically: true, encoding: .utf8)
+        }
+        try "{new corrupt state".write(to: store.directory.appendingPathComponent("state.json"),
+                                        atomically: true, encoding: .utf8)
+
+        _ = store.load()
+
+        let files = try FileManager.default.contentsOfDirectory(atPath: store.directory.path)
+        XCTAssertTrue(files.contains { file in
+            file.hasPrefix("state.corrupt-") &&
+                (try? String(contentsOf: store.directory.appendingPathComponent(file), encoding: .utf8)) == "{new corrupt state"
+        })
     }
 }

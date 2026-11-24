@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-[ -d Vendor/GhosttyVt.xcframework ] || ./scripts/build-vt.sh
+./scripts/build-vt.sh
 swift build -c release
 
 APP="$ROOT/build/Plum.app"
@@ -41,8 +41,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleExecutable</key><string>Plum</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.1.10</string>
-    <key>CFBundleVersion</key><string>11</string>
+    <key>CFBundleShortVersionString</key><string>0.1.11</string>
+    <key>CFBundleVersion</key><string>12</string>
     <key>CFBundleDevelopmentRegion</key><string>en</string>
     <key>CFBundleLocalizations</key><array><string>en</string><string>ko</string></array>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
@@ -55,5 +55,5 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-codesign --force --sign - "$APP" 2>/dev/null
+codesign --force --options runtime --sign - "$APP" 2>/dev/null
 echo "OK: $APP ($(du -sh "$APP" | cut -f1))"

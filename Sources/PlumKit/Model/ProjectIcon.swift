@@ -38,8 +38,9 @@ enum ProjectIcon {
     /// The owner's GitHub picture, as Orca shows it when the repository has no icon of its own.
     static func ownerPicture(_ owner: String) async -> Data? {
         guard let url = URL(string: "https://github.com/\(owner).png?size=64"),
-              let (data, response) = try? await URLSession.shared.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200, data.count <= maxBytes,
+              let (bytes, response) = try? await URLSession.shared.bytes(from: url),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let data = try? await Updates.collect(bytes, expectedLength: response.expectedContentLength, limit: maxBytes),
               NSImage(data: data)?.isValid == true else { return nil }
         return data
     }

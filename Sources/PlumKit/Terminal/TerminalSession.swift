@@ -301,24 +301,6 @@ public final class TerminalSession {
         }
         set(GHOSTTY_TERMINAL_OPT_SIZE, unsafeBitCast(size, to: UnsafeRawPointer.self))
 
-        // OSC 52 and the like: vim's "+y, tmux, a program over ssh copying to
-        // the Mac's clipboard. Only text is taken; reading the clipboard
-        // back is never offered.
-        let clipboardWrite: GhosttyTerminalClipboardWriteFn = { _, _, request in
-            guard let request else { return }
-            var reply = GhosttyClipboardWriteReply(
-                size: MemoryLayout<GhosttyClipboardWriteReply>.size, result: GHOSTTY_CLIPBOARD_WRITE_RESULT_UNSUPPORTED, remember: false)
-            let write = request.pointee
-            let contents = (0..<write.contents_len).map { write.contents[$0] }
-            if write.location == GHOSTTY_CLIPBOARD_LOCATION_STANDARD,
-               let text = contents.first(where: { String(ghostty: $0.mime).hasPrefix("text/plain") }).map({ String(ghostty: $0.data) }) {
-                DispatchQueue.main.async { TerminalSession.copyToClipboard(text) }
-                reply.result = GHOSTTY_CLIPBOARD_WRITE_RESULT_SUCCESS
-            }
-            write.reply(request, &reply)
-        }
-        set(GHOSTTY_TERMINAL_OPT_CLIPBOARD_WRITE, unsafeBitCast(clipboardWrite, to: UnsafeRawPointer.self))
-
         let colorScheme: GhosttyTerminalColorSchemeFn = { _, _, out in
             out?.pointee = GHOSTTY_COLOR_SCHEME_DARK
             return true
@@ -637,13 +619,6 @@ public final class TerminalSession {
     }
 
     // MARK: Input
-
-    /// Where programs' clipboard writes go. Scripted checks swap it out so
-    /// the user's clipboard is left alone.
-    public static var copyToClipboard: (String) -> Void = { text in
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
-    }
 
     /// ⌥ is Meta (Esc before the key) rather than macOS's way to type
     /// symbols. The same for every terminal: a setting.

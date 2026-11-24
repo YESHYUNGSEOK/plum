@@ -363,8 +363,6 @@ extension AppModel {
             return NSApp.windows.filter(\.isVisible).map { "\($0.windowNumber) \(type(of: $0)) \(NSStringFromRect($0.frame))" }.joined(separator: "; ")
         case "notifications":
             return "badge=\(NSApp.dockTile.badgeLabel ?? "none"); " + (debugNotificationStatus?() ?? "unavailable")
-        case "copied": // what programs wrote to the clipboard (OSC 52)
-            return DebugLog.copied.joined(separator: "\n")
         case "prompt": // -1 or 1: jump between commands, as ⌘↑ / ⌘↓
             guard let delta = Int(argument), let terminal = debugTerminalView?() else { return "bad arguments" }
             terminal.scrollToPrompt(delta)
@@ -492,7 +490,6 @@ enum HitchMeter {
 @MainActor
 enum DebugLog {
     static var links: [String] = []
-    static var copied: [String] = []
     static var trace = ""
     static var menu = ""
     static var menuObserver: NSObjectProtocol?

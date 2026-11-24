@@ -1,4 +1,5 @@
 import AppKit
+import Security
 
 /// A one-time import of what someone had in Orca: its repositories become
 /// projects and their worktrees workspaces. Read through Orca's own CLI
@@ -43,9 +44,25 @@ enum OrcaImport {
     /// Orca's CLI inside its app, if Orca is installed. Run by this path,
     /// never looked up in PATH.
     static func cli() -> URL? {
-        guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return nil }
+        guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID),
+              trustedApp(app) else { return nil }
         let cli = app.appendingPathComponent("Contents/Resources/bin/orca")
-        return FileManager.default.isExecutableFile(atPath: cli.path) ? cli : nil
+        guard let values = try? cli.resourceValues(forKeys: [.isRegularFileKey]),
+              values.isRegularFile == true,
+              FileManager.default.isExecutableFile(atPath: cli.path) else { return nil }
+        return cli
+    }
+
+    static func trustedApp(_ app: URL) -> Bool {
+        let flags = SecCSFlags(rawValue: 0)
+        let identity = "identifier \"com.stablyai.orca\" and anchor apple generic and certificate leaf[subject.OU] = \"6CX3WHS9HZ\""
+        var requirement: SecRequirement?
+        var code: SecStaticCode?
+        guard SecRequirementCreateWithString(identity as CFString, flags, &requirement) == errSecSuccess,
+              let requirement,
+              SecStaticCodeCreateWithPath(app as CFURL, flags, &code) == errSecSuccess,
+              let code else { return false }
+        return SecStaticCodeCheckValidity(code, SecCSFlags(rawValue: kSecCSStrictValidate | kSecCSCheckAllArchitectures), requirement) == errSecSuccess
     }
 
     /// Orca's version, for saying which Orca's output couldn't be read.
@@ -105,13 +122,27 @@ enum OrcaImport {
         process.standardOutput = stdout
         process.standardError = FileHandle.nullDevice
         process.standardInput = FileHandle.nullDevice
+        var environment = ProcessInfo.processInfo.environment
+        environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+        environment.removeValue(forKey: "BASH_ENV")
+        environment.removeValue(forKey: "ENV")
+        environment.removeValue(forKey: "ORCA_CLI_COMMAND")
+        environment.removeValue(forKey: "ORCA_CLI_HANDOFF")
+        process.environment = environment
         let exited = DispatchSemaphore(value: 0)
         process.terminationHandler = { _ in exited.signal() }
         do { try process.run() } catch { throw Failure.unreadable }
         var output = Data()
+        var oversized = false
         let read = DispatchSemaphore(value: 0)
         DispatchQueue.global().async {
-            output = stdout.fileHandleForReading.readDataToEndOfFile()
+            while true {
+                let chunk = stdout.fileHandleForReading.readData(ofLength: 1 << 16)
+                if chunk.isEmpty { break }
+                let remaining = max(0, (16 << 20) - output.count)
+                output.append(contentsOf: chunk.prefix(remaining))
+                if chunk.count > remaining { oversized = true }
+            }
             read.signal()
         }
         let deadline = DispatchTime.now() + timeout
@@ -119,6 +150,7 @@ enum OrcaImport {
             process.terminate()
             throw Failure.unreadable
         }
+        guard !oversized else { throw Failure.unreadable }
         return output
     }
 
