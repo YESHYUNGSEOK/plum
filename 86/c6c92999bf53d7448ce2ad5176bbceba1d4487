@@ -1,0 +1,14 @@
+docs/releases/v0.1.11-preparation.md
+  h_f06ae705ed6fdb 5-6,26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "86c6c92999bf53d7448ce2ad5176bbceba1d4487",
+  "prompts": {},
+  "humans": {
+    "h_f06ae705ed6fdb": {
+      "author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    }
+  }
+}
