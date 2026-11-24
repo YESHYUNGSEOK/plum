@@ -234,15 +234,20 @@ public struct Store {
 
     private var stateFile: URL { directory.appendingPathComponent("state.json") }
 
-    public func load() -> AppState {
-        guard let data = try? Data(contentsOf: stateFile) else { return AppState() }
+    public func load() throws -> AppState {
+        let data: Data
+        do { data = try Data(contentsOf: stateFile) }
+        catch {
+            var details = stat()
+            if lstat(stateFile.path, &details) != 0, errno == ENOENT { return AppState() }
+            throw error
+        }
         do {
             return try JSONDecoder().decode(AppState.self, from: data)
         } catch {
             // Never overwrite a file we couldn't read: keep it for recovery.
             let backup = directory.appendingPathComponent("state.corrupt-\(UUID().uuidString).json")
-            do { try FileManager.default.moveItem(at: stateFile, to: backup) }
-            catch { fatalError("Plum could not preserve unreadable state: \(error)") }
+            try FileManager.default.moveItem(at: stateFile, to: backup)
             return AppState()
         }
     }

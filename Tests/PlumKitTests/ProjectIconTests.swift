@@ -55,6 +55,14 @@ final class ProjectIconTests: XCTestCase {
         XCTAssertNil(ProjectIcon.find(in: root.path))
     }
 
+    func testOversizedImageDimensionsAreSkipped() throws {
+        let wide = png(width: 2048, height: 1)
+        XCTAssertLessThan(wide.count, ProjectIcon.maxBytes)
+        try write("favicon.png", wide)
+
+        XCTAssertNil(ProjectIcon.find(in: root.path))
+    }
+
     func testSymlinkedIconOutsideRepositoryIsSkipped() throws {
         let outside = root.deletingLastPathComponent().appendingPathComponent("plum-private-icon-\(UUID().uuidString).png")
         defer { try? FileManager.default.removeItem(at: outside) }
@@ -80,8 +88,8 @@ final class ProjectIconTests: XCTestCase {
         try data.write(to: url)
     }
 
-    private func png() -> Data {
-        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 4, pixelsHigh: 4, bitsPerSample: 8, samplesPerPixel: 4,
+    private func png(width: Int = 4, height: Int = 4) -> Data {
+        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height, bitsPerSample: 8, samplesPerPixel: 4,
                                    hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
         return rep.representation(using: .png, properties: [:])!
     }

@@ -432,12 +432,28 @@ final class WorkspaceServiceTests: XCTestCase {
         state.projects = [project]
         state.settings.branchPrefix = "eric/"
         try store.save(state)
-        XCTAssertEqual(store.load(), state)
+        XCTAssertEqual(try store.load(), state)
 
         try "{not json".write(to: store.directory.appendingPathComponent("state.json"), atomically: true, encoding: .utf8)
-        XCTAssertEqual(store.load(), AppState())
+        XCTAssertEqual(try store.load(), AppState())
         let files = try FileManager.default.contentsOfDirectory(atPath: store.directory.path)
         XCTAssertTrue(files.contains { $0.hasPrefix("state.corrupt-") }, "\(files)")
+    }
+
+    func testUnreadableStateIsNotTreatedAsAFirstLaunch() throws {
+        let store = Store(directory: sandbox.appendingPathComponent("state"))
+        let file = store.directory.appendingPathComponent("state.json")
+        var state = AppState()
+        state.projects = [project]
+        let original = try JSONEncoder().encode(state)
+        try original.write(to: file)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: file.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path) }
+
+        XCTAssertThrowsError(try store.load())
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+        XCTAssertEqual(try Data(contentsOf: file), original)
+        XCTAssertEqual(try store.load(), state)
     }
 
     func testStoreProtectsExistingStateDirectory() throws {
@@ -471,7 +487,7 @@ final class WorkspaceServiceTests: XCTestCase {
         try "{new corrupt state".write(to: store.directory.appendingPathComponent("state.json"),
                                         atomically: true, encoding: .utf8)
 
-        _ = store.load()
+        _ = try store.load()
 
         let files = try FileManager.default.contentsOfDirectory(atPath: store.directory.path)
         XCTAssertTrue(files.contains { file in
