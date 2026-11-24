@@ -1,0 +1,37 @@
+Sources/PlumKit/Model/StatusServer.swift
+  s_89eee16ca7381c::t_3f2544b2e952b5 58-62,69,101,103,213
+Sources/PlumKit/Model/WorkspaceService.swift
+  s_89eee16ca7381c::t_c643f53139c6cd 16,127-129,131,141,143-145,158-160
+Sources/PlumKit/Terminal/TerminalSession.swift
+  s_b0ba35075bf01c::t_5c1e7515507f63 214-215
+Sources/PlumKit/UI/Sidebar.swift
+  s_89eee16ca7381c::t_8d6deed207dd80 510
+Tests/PlumKitTests/ProjectIconTests.swift
+  s_89eee16ca7381c::t_544ee15e1a0d96 67-76
+Tests/PlumKitTests/TerminalSessionTests.swift
+  s_b0ba35075bf01c::t_f77d6540a3b4f1 1,6-12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2c777e613ddc1bb6480f55dbc7c58af99f5a7a9a",
+  "prompts": {},
+  "sessions": {
+    "s_89eee16ca7381c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20b45-3c28-7831-9594-e2a4b17c2cbc",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    },
+    "s_b0ba35075bf01c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6e5b7bb4-b615-4f07-9131-5049dfbd04a7",
+        "model": "claude-fable-5-2"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    }
+  }
+}
