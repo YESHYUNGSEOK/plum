@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 
 /// A project's own icon, found the way Orca finds it: a PNG or WebP at one of
 /// the usual places in the repository, else the one a page links to as its
@@ -6,6 +7,7 @@ import AppKit
 /// repository (`find(in:)` reads only the repository; `ownerPicture` asks GitHub).
 enum ProjectIcon {
     static let maxBytes = 256 * 1024
+    static let maxDimension = 1024
     static let places = [
         "favicon", "public/favicon", "app/favicon", "app/icon", "src/favicon", "src/app/icon", "assets/favicon",
         "assets/icon", "static/favicon", "logo", "public/logo", "public/icon", "src-tauri/icons/icon", "app-icon", "icon",
@@ -41,7 +43,7 @@ enum ProjectIcon {
               let (bytes, response) = try? await URLSession.shared.bytes(from: url),
               (response as? HTTPURLResponse)?.statusCode == 200,
               let data = try? await Updates.collect(bytes, expectedLength: response.expectedContentLength, limit: maxBytes),
-              NSImage(data: data)?.isValid == true else { return nil }
+              validImage(data) else { return nil }
         return data
     }
 
@@ -95,7 +97,16 @@ enum ProjectIcon {
         guard let data = file(relative, in: root) else { return nil }
         let png = data.starts(with: [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
         let webp = data.count > 12 && data.prefix(4) == Data("RIFF".utf8) && data.dropFirst(8).prefix(4) == Data("WEBP".utf8)
-        guard png || webp, NSImage(data: data)?.isValid == true else { return nil }
+        guard png || webp, validImage(data) else { return nil }
         return data
+    }
+
+    private static func validImage(_ data: Data) -> Bool {
+        guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any],
+              let width = properties[kCGImagePropertyPixelWidth as String] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight as String] as? Int,
+              (1...maxDimension).contains(width), (1...maxDimension).contains(height) else { return false }
+        return NSImage(data: data)?.isValid == true
     }
 }
