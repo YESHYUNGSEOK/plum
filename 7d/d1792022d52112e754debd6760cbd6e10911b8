@@ -1,0 +1,57 @@
+Sources/CPty/cpty.c
+  s_74ed3cfc6ccc40::t_68070cdc326482 35
+Sources/PlumKit/Model/Models.swift
+  s_89eee16ca7381c::t_dc0176420bd508 100,103,168,191-194,220-232,243-245,293,306,327-328,332-333
+Sources/PlumKit/Model/OrcaImport.swift
+  s_75a15bfdeb14de::t_e8e8bc9b68c374 2,47-48,50-65,125-131,136,139-145,153
+Sources/PlumKit/UI/App.swift
+  s_89eee16ca7381c::t_a4c5495787dd0d 86
+Tests/PlumKitTests/GitSecurityTests.swift
+  s_75a15bfdeb14de::t_838afe72448345 1-278
+Tests/PlumKitTests/StatusServerSecurityTests.swift
+  s_89eee16ca7381c::t_92d8cdc51890a1 1-89
+Tests/PlumKitTests/TabProgramTests.swift
+  s_89eee16ca7381c::t_da87f7bf87d75c 55,57
+Tests/PlumKitTests/UpdateInstallTests.swift
+  s_89eee16ca7381c::t_b6b2691c6ef327 31-55
+Tests/PlumKitTests/WorkspaceDetailsTests.swift
+  s_89eee16ca7381c::t_d7a6496f7f88d7 8-12
+Tests/PlumKitTests/WorkspaceServiceTests.swift
+  s_89eee16ca7381c::t_7c9de9f5e804eb 50-80,288-297,352-391
+docs/superpowers/plans/2026-11-24-terminal-preserving-security-update.md
+  s_89eee16ca7381c::t_98f951b9ae8546 1-68
+docs/superpowers/specs/2026-11-24-terminal-preserving-security-update-design.md
+  s_89eee16ca7381c::t_e801668d8c2738 1-21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7dd1792022d52112e754debd6760cbd6e10911b8",
+  "prompts": {},
+  "sessions": {
+    "s_74ed3cfc6ccc40": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3a39ebac-5654-415f-88af-28724abff585",
+        "model": "claude-fable-5-2"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    },
+    "s_75a15bfdeb14de": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e918-c513-7f20-a1f8-3afbe1582b72",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    },
+    "s_89eee16ca7381c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20b45-3c28-7831-9594-e2a4b17c2cbc",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    }
+  }
+}
