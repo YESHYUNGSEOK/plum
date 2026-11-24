@@ -107,4 +107,32 @@ final class AgentReportTests: XCTestCase {
         XCTAssertEqual(report.weeklyResets, ISO8601DateFormatter().date(from: "2026-11-29T01:00:00Z"))
         XCTAssertNil(ClaudeUsage.parse(Data("rate limited".utf8)))
     }
+
+    @MainActor
+    func testNotificationTitlesAreMarkedByWhatHappened() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("plum-marks-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var project = Project(name: "alpha", path: directory.path)
+        project.folder = true
+        var state = AppState()
+        state.projects = [project]
+        try Store(directory: directory.appendingPathComponent("state")).save(state)
+        let model = AppModel(store: Store(directory: directory.appendingPathComponent("state")))
+        try await model.createWorkspace(projectID: project.id, name: "one", branch: "", choice: .new(base: nil), program: .terminal)
+        let tab = try XCTUnwrap(model.tabs[model.state.workspaces[0].id]?.first)
+        var titles: [String] = []
+        model.notify = { title, _, _ in titles.append(title) }
+        func say(_ line: String) throws {
+            let message = try XCTUnwrap(StatusMessage.parse("\(tab.id.uuidString) \(line)"))
+            model.setStatus(message.status, message: message.message, tab: tab.id, structured: true)
+        }
+        try say("waiting")
+        try say("working")
+        try say("done all good")
+        try say("working")
+        try say("failed")
+        XCTAssertEqual(titles, ["🐱 alpha · one", "👍 alpha · one", "😡 alpha · one"])
+        model.closeTab(tab.id)
+    }
 }

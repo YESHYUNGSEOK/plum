@@ -827,7 +827,9 @@ public final class AppModel {
         if !visible, effective == .waiting || effective == .done, let workspace = workspace(tab.workspaceID) {
             let project = project(workspace.projectID)?.name ?? ""
             let fallback = effective == .waiting ? String(localized: "입력을 기다리고 있습니다.") : String(localized: "작업을 마쳤습니다.")
-            notify?("\(project) · \(workspace.name)", message.isEmpty ? fallback : message, id)
+            // A glance tells which: waiting for you, done, or stopped by an error.
+            let mark = effective == .waiting ? "🐱" : message == StatusMessage.failed ? "😡" : "👍"
+            notify?("\(mark) \(project) · \(workspace.name)", message.isEmpty ? fallback : message, id)
         }
     }
 

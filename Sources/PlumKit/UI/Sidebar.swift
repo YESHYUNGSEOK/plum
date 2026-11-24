@@ -480,6 +480,26 @@ private struct PlanUsage: View {
     }
 
     private func bar(_ label: LocalizedStringKey, _ used: Double, resets: Date? = nil) -> some View {
+        UsageBar(label: label, used: used, resets: resets)
+    }
+}
+
+/// One limit: its name, a bar and the percentage. Under the pointer, a
+/// bubble above it says when the limit starts over: "in 3 days (29 Nov,
+/// 10:00)". Drawn here, not left to the system's tooltip, which didn't
+/// come up over this row.
+private struct UsageBar: View {
+    let label: LocalizedStringKey
+    let used: Double
+    let resets: Date?
+    @State private var hovering = false
+
+    /// "in 5 days (29 Nov, 00:57)"
+    static func resetText(_ resets: Date) -> String {
+        String(localized: "\(resets.formatted(.relative(presentation: .numeric))) 초기화 (\(resets.formatted(.dateTime.month().day().hour().minute())))")
+    }
+
+    var body: some View {
         HStack(spacing: 4) {
             Text(label)
             Capsule().fill(Theme.ring)
@@ -489,8 +509,28 @@ private struct PlanUsage: View {
                 }
             Text(verbatim: "\(Int(used.rounded()))%")
         }
-        // When it starts over, on hover: "in 3 hours (24 Nov, 13:00)".
-        .help(resets.map { String(localized: "\($0.formatted(.relative(presentation: .numeric))) 초기화 (\($0.formatted(date: .abbreviated, time: .shortened)))") } ?? "")
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .overlay(alignment: .topLeading) {
+            if hovering, let resets {
+                Text(Self.resetText(resets))
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.text)
+                    .fixedSize()
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Theme.menu))
+                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.hairline))
+                    .shadow(color: .black.opacity(Theme.shadowOpacity), radius: 8, y: 3)
+                    // Above the bar, clear of it, starting under the agent's icon so it fits a narrow sidebar.
+                    .offset(x: -20, y: -30)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
+        }
+        .animation(Motion.hover, value: hovering)
+        .accessibilityElement(children: .combine)
+        .accessibilityHint(Text(resets.map(Self.resetText) ?? ""))
     }
 }
 

@@ -10,6 +10,8 @@ public enum StatusMessage {
             let (status, message) = afterStop(parts.count > 2 ? parts[2] : "")
             return (tab, status, sanitizeForDisplay(message, limit: 200))
         }
+        // An agent stopped by an error (Claude's StopFailure): done, and said so in `failed`.
+        if parts[1] == "failed" { return (tab, .done, failed) }
         guard let status = AgentStatus(rawValue: parts[1]) else { return nil }
         return (tab, status, sanitizeForDisplay(parts.count > 2 ? parts[2] : "", limit: 200))
     }
@@ -18,6 +20,10 @@ public enum StatusMessage {
     /// that will wake it: a subagent means it is still working; a command,
     /// a monitor, a workflow or a scheduled wakeup means it is monitoring.
     /// The final answer comes along, for the notification.
+    /// What a tab that stopped on an error says, in place of a last answer;
+    /// the notification for it is marked apart from a finished one's.
+    public static var failed: String { String(localized: "오류로 멈췄습니다.") }
+
     static func afterStop(_ json: String) -> (AgentStatus, String) {
         guard let input = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any] else { return (.done, "") }
         let message = input["last_assistant_message"] as? String ?? ""
@@ -266,7 +272,7 @@ public enum HookSettings {
             "PostToolUseFailure": group("working"),
             "Notification": group("waiting", matcher: "permission_prompt|elicitation_dialog|agent_needs_input"),
             "Stop": [["hooks": [["type": "command", "command": stopCommand]]]],
-            "StopFailure": group("done"),
+            "StopFailure": group("failed"),
             "SessionEnd": group("idle"),
         ]]
         if let statusLine {
