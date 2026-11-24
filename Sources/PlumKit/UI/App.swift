@@ -1,10 +1,44 @@
 import AppKit
+import Darwin
 import Observation
 import UserNotifications
 
-/// Starts Plum. Never returns.
+final class AppInstanceLock {
+    private let fd: Int32
+
+    init(directory: URL) throws {
+        let appLock = directory.appendingPathComponent("plum.app.lock").path
+        let held = open(appLock, O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard held >= 0 else { throw POSIXError(.init(rawValue: errno) ?? .EIO) }
+        guard flock(held, LOCK_EX | LOCK_NB) == 0 else {
+            close(held)
+            throw POSIXError(.EADDRINUSE)
+        }
+        do {
+            let statusLock = directory.appendingPathComponent("plum.sock.lock").path
+            let existing = open(statusLock, O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, 0o600)
+            guard existing >= 0 else { throw POSIXError(.init(rawValue: errno) ?? .EIO) }
+            defer { close(existing) }
+            guard flock(existing, LOCK_EX | LOCK_NB) == 0 else { throw POSIXError(.EADDRINUSE) }
+        } catch {
+            close(held)
+            throw error
+        }
+        fd = held
+    }
+
+    deinit { close(fd) }
+}
+
+/// Starts Plum, or returns if its state is already open in another process.
 @MainActor
 public func runApp() {
+    let instanceLock: AppInstanceLock
+    do { instanceLock = try AppInstanceLock(directory: Store().directory) }
+    catch {
+        FileHandle.standardError.write(Data("Plum 상태를 안전하게 열 수 없습니다: \(error)\n".utf8))
+        return
+    }
     // A write to a pipe or socket whose reader is gone fails with EPIPE, which
     // every write here handles, instead of ending the app without a trace
     // (a script that closed its connection before reading the answer to a
@@ -15,7 +49,7 @@ public func runApp() {
     app.delegate = delegate
     app.setActivationPolicy(.regular)
     app.run()
-    withExtendedLifetime(delegate) {}
+    withExtendedLifetime((delegate, instanceLock)) {}
 }
 
 @MainActor
