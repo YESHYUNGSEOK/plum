@@ -1,0 +1,29 @@
+README.ko.md
+  s_bf0ed424735551::t_825a58611e4446 164
+README.md
+  s_bf0ed424735551::t_ed6e4dbef7e989 169
+Resources/en.lproj/Localizable.strings
+  s_bf0ed424735551::t_8f8cf7141709d2 300
+Sources/PlumKit/Model/DebugCommands.swift
+  s_bf0ed424735551::t_76f26fcf9c9a7e 148-154
+Sources/PlumKit/UI/AppActions.swift
+  s_bf0ed424735551::t_5805fedeaa0d95 162-163,167,176-178,181,194
+Sources/PlumKit/UI/MainWindow.swift
+  s_bf0ed424735551::t_42c97ce5ca5f29 767
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d4e9125d086554be5b777e7afaf392ea74bfba27",
+  "prompts": {},
+  "sessions": {
+    "s_bf0ed424735551": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5ac29605-eee3-4cf1-9703-b5fa4086d055",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    }
+  }
+}
