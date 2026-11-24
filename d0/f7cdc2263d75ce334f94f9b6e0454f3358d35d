@@ -1,0 +1,21 @@
+Sources/PlumKit/Model/AgentTrust.swift
+  s_bf0ed424735551::t_3b16c6333e9fca 48,115-117
+Tests/PlumKitTests/CodexHooksTests.swift
+  s_bf0ed424735551::t_3c80910bcf9e0c 48-63,71-79
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d0f7cdc2263d75ce334f94f9b6e0454f3358d35d",
+  "prompts": {},
+  "sessions": {
+    "s_bf0ed424735551": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5ac29605-eee3-4cf1-9703-b5fa4086d055",
+        "model": "claude-fable-5-2"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    }
+  }
+}
