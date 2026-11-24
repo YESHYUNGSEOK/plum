@@ -1,0 +1,37 @@
+README.ko.md
+  s_bf0ed424735551::t_63ee7ecc2a8dc9 164,173,256
+README.md
+  s_bf0ed424735551::t_15d57ec93eae06 169,178
+Resources/en.lproj/Localizable.strings
+  s_bf0ed424735551::t_6d8be7b8b52e72 300
+Sources/PlumKit/Model/AppModel.swift
+  s_bf0ed424735551::t_28c5cfd179f936 96-98
+Sources/PlumKit/Model/DebugCommands.swift
+  s_bf0ed424735551::t_370139f6f4eb43 148-151,427
+Sources/PlumKit/UI/App.swift
+  s_bf0ed424735551::t_060d8efe1e0b8e 21,54-60,98-103,196-203,205,207-208,225
+Sources/PlumKit/UI/AppActions.swift
+  s_bf0ed424735551::t_d0f0164489ce89 162-163,167-169,178-207
+Sources/PlumKit/UI/Controls.swift
+  s_bf0ed424735551::t_ab3c6aa349b3a5 282-283,287,309-315
+Sources/PlumKit/UI/MainWindow.swift
+  s_bf0ed424735551::t_e3c5a30948dc0e 755-758,764-774
+docs/verification.md
+  s_bf0ed424735551::t_1c7aa752cdae00 67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8cac1b648281c577317e0248d5b0f6bacd0db8eb",
+  "prompts": {},
+  "sessions": {
+    "s_bf0ed424735551": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5ac29605-eee3-4cf1-9703-b5fa4086d055",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    }
+  }
+}
