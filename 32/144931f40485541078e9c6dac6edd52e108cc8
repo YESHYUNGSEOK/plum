@@ -1,0 +1,16 @@
+docs/releases/v0.1.19-notes.md
+  h_f06ae705ed6fdb 1-17
+docs/releases/v0.1.19-preparation.md
+  h_f06ae705ed6fdb 1-17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "32144931f40485541078e9c6dac6edd52e108cc8",
+  "prompts": {},
+  "humans": {
+    "h_f06ae705ed6fdb": {
+      "author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    }
+  }
+}
