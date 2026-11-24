@@ -1,0 +1,21 @@
+Tests/PlumKitTests/AppInstanceLockTests.swift
+  s_bf0ed424735551::t_92f49a63e659da 1-26
+scripts/bundle.sh
+  s_bf0ed424735551::t_3f950dba5d9d2e 44-45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "28a889229d80ab9ae836d67ed002228ca33841d0",
+  "prompts": {},
+  "sessions": {
+    "s_bf0ed424735551": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5ac29605-eee3-4cf1-9703-b5fa4086d055",
+        "model": "claude-fable-5-2"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    }
+  }
+}
