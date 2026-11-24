@@ -1,0 +1,19 @@
+Sources/PlumKit/Model/WorkspaceService.swift
+  s_b0ba35075bf01c::t_cc3ffeb581809d 123-125,161-165
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7132205333297450037dabc47b72c179e19aba16",
+  "prompts": {},
+  "sessions": {
+    "s_b0ba35075bf01c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6e5b7bb4-b615-4f07-9131-5049dfbd04a7",
+        "model": "unknown"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    }
+  }
+}
