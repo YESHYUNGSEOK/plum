@@ -84,6 +84,16 @@ final class AgentLaunchTests: XCTestCase {
         XCTAssertEqual(try String(contentsOfFile: config, encoding: .utf8), "{}")
     }
 
+    func testClaudeTrustKeepsAnUnexpectedProjectEntry() throws {
+        let directory = try temporaryDirectory()
+        let config = directory.appendingPathComponent(".claude.json")
+        let original = try JSONSerialization.data(withJSONObject: ["projects": [ClaudeTrust.realPath(directory.path): "custom"]])
+        try original.write(to: config)
+
+        XCTAssertEqual(ClaudeTrust.grant(directory.path, config: config.path), .unreadable)
+        XCTAssertEqual(try Data(contentsOf: config), original)
+    }
+
     func testCodexTrustAppendsATable() throws {
         let directory = try temporaryDirectory()
         let config = directory.appendingPathComponent("config.toml").path
@@ -103,6 +113,19 @@ final class AgentLaunchTests: XCTestCase {
         FileManager.default.createFile(atPath: config, contents: Data(inline.utf8))
         XCTAssertEqual(CodexTrust.grant(directory.path, config: config), .unreadable)
         XCTAssertEqual(try String(contentsOfFile: config, encoding: .utf8), inline)
+    }
+
+    func testCodexTrustKeepsAnExistingTableWithAComment() throws {
+        let directory = try temporaryDirectory()
+        let config = directory.appendingPathComponent("config.toml").path
+        let real = ClaudeTrust.realPath(directory.path)
+        for header in ["[projects.\"\(real)\"] # already configured", "[ projects . '\(real)' ] # already configured"] {
+            let original = "\(header)\ntrust_level = \"untrusted\"\n"
+            try original.write(toFile: config, atomically: true, encoding: .utf8)
+
+            XCTAssertEqual(CodexTrust.grant(directory.path, config: config), .unchanged)
+            XCTAssertEqual(try String(contentsOfFile: config, encoding: .utf8), original)
+        }
     }
 
     private func temporaryDirectory() throws -> URL {

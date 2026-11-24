@@ -364,12 +364,15 @@ public enum CodexHooks {
             let mine = groups.firstIndex { group in
                 (group["hooks"] as? [[String: Any]] ?? []).contains { ($0["command"] as? String)?.hasPrefix(marker) == true }
             }
-            let group: [String: Any] = ["hooks": [["type": "command", "command": command]]]
             if let mine {
-                guard (groups[mine]["hooks"] as? [[String: Any]])?.first?["command"] as? String != command else { continue }
-                groups[mine] = group
+                guard var entries = groups[mine]["hooks"] as? [[String: Any]],
+                      let index = entries.firstIndex(where: { ($0["command"] as? String)?.hasPrefix(marker) == true }) else { return .unreadable }
+                if entries[index]["command"] as? String == command, entries[index]["type"] as? String == "command" { continue }
+                entries[index]["type"] = "command"
+                entries[index]["command"] = command
+                groups[mine]["hooks"] = entries
             } else {
-                groups.append(group)
+                groups.append(["hooks": [["type": "command", "command": command]]])
             }
             hooks[event] = groups
             changed = true
@@ -379,7 +382,14 @@ public enum CodexHooks {
         guard let data = try? JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
         else { return .unreadable }
         let backup = file + ".pre-plum"
-        if manager.fileExists(atPath: file), !manager.fileExists(atPath: backup) { try? manager.copyItem(atPath: file, toPath: backup) }
+        var backupInfo = stat()
+        if lstat(backup, &backupInfo) == 0 {
+            guard backupInfo.st_mode & S_IFMT == S_IFREG else { return .unreadable }
+        } else if errno == ENOENT {
+            if manager.fileExists(atPath: file), (try? manager.copyItem(atPath: file, toPath: backup)) == nil { return .unreadable }
+        } else {
+            return .unreadable
+        }
         let temporary = file + ".plum-\(UUID().uuidString).tmp"
         let mode = (try? manager.attributesOfItem(atPath: file)[.posixPermissions] as? Int) ?? 0o600
         guard manager.createFile(atPath: temporary, contents: data, attributes: [.posixPermissions: mode]) else { return .unreadable }

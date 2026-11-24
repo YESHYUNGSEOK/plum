@@ -45,11 +45,36 @@ final class CodexHooksTests: XCTestCase {
         XCTAssertEqual((stop[1]["hooks"] as? [[String: Any]])?.first?["command"] as? String, "theirs")
     }
 
+    func testUpdatingPlumHookKeepsOtherCommandsInItsGroup() throws {
+        let original = #"{"hooks":{"Stop":[{"matcher":"keep","hooks":[{"type":"command","command":"theirs"},{"type":"command","command":": plum-agent-hook-form=1; old"}]}]}}"#
+        try Data(original.utf8).write(to: URL(fileURLWithPath: file))
+
+        XCTAssertEqual(CodexHooks.install(file: file), .granted)
+        let root = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: file))) as? [String: Any])
+        let group = try XCTUnwrap(((root["hooks"] as? [String: [[String: Any]]])?["Stop"])?.first)
+        let commands = try XCTUnwrap(group["hooks"] as? [[String: Any]])
+        XCTAssertEqual(group["matcher"] as? String, "keep")
+        XCTAssertEqual(commands.count, 2)
+        XCTAssertEqual(commands[0]["command"] as? String, "theirs")
+        let plum = try XCTUnwrap(commands.last)
+        XCTAssertTrue((plum["command"] as? String)?.hasPrefix(CodexHooks.marker) == true)
+        XCTAssertNotEqual(plum["command"] as? String, ": plum-agent-hook-form=1; old")
+    }
+
     func testLeavesWhatItCantReadAlone() throws {
         try Data("{ not json".utf8).write(to: URL(fileURLWithPath: file))
         XCTAssertEqual(CodexHooks.install(file: file), .unreadable)
         XCTAssertEqual(try String(contentsOfFile: file, encoding: .utf8), "{ not json")
         XCTAssertEqual(CodexHooks.install(file: home.appendingPathComponent("no-codex/hooks.json").path), .missingConfig)
+    }
+
+    func testLeavesHooksAloneWhenBackupCannotBeMade() throws {
+        let original = #"{"hooks":{}}"#
+        try Data(original.utf8).write(to: URL(fileURLWithPath: file))
+        try FileManager.default.createDirectory(atPath: file + ".pre-plum", withIntermediateDirectories: false)
+
+        XCTAssertEqual(CodexHooks.install(file: file), .unreadable)
+        XCTAssertEqual(try String(contentsOfFile: file, encoding: .utf8), original)
     }
 
     func testUpdatesLinkedHooksWithoutReplacingTheLink() throws {

@@ -45,6 +45,7 @@ public enum ClaudeTrust {
         guard json["projects"] == nil || json["projects"] is [String: Any] else { return .unreadable }
         var projects = json["projects"] as? [String: Any] ?? [:]
         for key in keys {
+            guard projects[key] == nil || projects[key] is [String: Any] else { return .unreadable }
             var entry = projects[key] as? [String: Any] ?? [:]
             entry["hasTrustDialogAccepted"] = true
             projects[key] = entry
@@ -111,7 +112,9 @@ public enum CodexTrust {
               let quoted = try? String(decoding: encoder.encode(real), as: UTF8.self) else { return .unreadable }
         let header = "[projects.\(quoted)]"
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespaces) }
-        if lines.contains(header) { return .unchanged }
+        let keys = [quoted, "'\(real)'"].map(NSRegularExpression.escapedPattern).joined(separator: "|")
+        let existing = "^\\s*\\[\\s*projects\\s*\\.\\s*(?:\(keys))\\s*\\]\\s*(?:#.*)?$"
+        if lines.contains(where: { $0.range(of: existing, options: .regularExpression) != nil }) { return .unchanged }
         // `projects = {…}` written inline can't take another table after it.
         if lines.contains(where: { $0.hasPrefix("projects") && $0.dropFirst(8).trimmingCharacters(in: .whitespaces).hasPrefix("=") }) {
             return .unreadable
