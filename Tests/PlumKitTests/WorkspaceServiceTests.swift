@@ -128,7 +128,8 @@ final class WorkspaceServiceTests: XCTestCase {
         var ws = try create("task").workspace
         XCTAssertFalse(WorkspaceService.inspect(ws, project: project, deletingBranch: false).isClean, "copied .env.local would be lost")
 
-        try WorkspaceService.removeWorktree(ws, project: project, force: true)
+        try WorkspaceService.removeWorktree(ws, project: project, force: true,
+                                            approved: WorkspaceService.inspect(ws, project: project, deletingBranch: false))
         XCTAssertFalse(FileManager.default.fileExists(atPath: ws.path))
         XCTAssertTrue(Git.branchExists("eric/task", in: project.path), "archive keeps the branch")
         ws.isArchived = true
@@ -138,7 +139,8 @@ final class WorkspaceServiceTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: ws.path + "/README.md"))
         XCTAssertEqual(restored.copiedFiles, [".env.local"])
 
-        try WorkspaceService.removeWorktree(restored.workspace, project: project, force: true)
+        try WorkspaceService.removeWorktree(restored.workspace, project: project, force: true,
+                                            approved: WorkspaceService.inspect(restored.workspace, project: project, deletingBranch: false))
         XCTAssertNil(Git.deleteBranchIfMerged("eric/task", in: project.path), "no commits of its own: merged")
         XCTAssertFalse(Git.branchExists("eric/task", in: project.path))
     }
@@ -163,7 +165,8 @@ final class WorkspaceServiceTests: XCTestCase {
         try commit("later.txt", "main moved on", in: project.path, "later")
 
         for ws in [kept, merged, squashed] {
-            let left = try WorkspaceService.delete(ws, project: project, force: true, approvedNested: [])
+            let approved = WorkspaceService.inspect(ws, project: project, deletingBranch: false)
+            let left = try WorkspaceService.delete(ws, project: project, force: true, approved: approved)
             XCTAssertFalse(FileManager.default.fileExists(atPath: ws.path), ws.name)
             XCTAssertEqual(left.map(\.name), ws.name == "kept" ? ["eric/kept"] : [], ws.name)
         }
@@ -197,7 +200,8 @@ final class WorkspaceServiceTests: XCTestCase {
         try Git.run(["-c", "user.email=t@example.com", "-c", "user.name=T", "commit", "-q", "-m", "feature (#2)"], in: other)
         try Git.run(["push", "-q", "origin", "main"], in: other)
 
-        XCTAssertEqual(try WorkspaceService.delete(ws, project: project, force: true, approvedNested: []), [])
+        let approved = WorkspaceService.inspect(ws, project: project, deletingBranch: false)
+        XCTAssertEqual(try WorkspaceService.delete(ws, project: project, force: true, approved: approved), [])
         XCTAssertFalse(Git.branchExists("eric/pr", in: project.path), "origin/main was fetched and holds the work")
     }
 
@@ -210,15 +214,29 @@ final class WorkspaceServiceTests: XCTestCase {
         let check = WorkspaceService.inspect(outer, project: project, deletingBranch: false)
         XCTAssertEqual(check.nested.map(\.branch), ["eric/inner"])
         XCTAssertFalse(check.isClean, "the inner worktree shows as untracked")
-        XCTAssertThrowsError(try WorkspaceService.delete(outer, project: project, force: true, approvedNested: []),
+        var wrong = check
+        wrong.nested = []
+        XCTAssertThrowsError(try WorkspaceService.delete(outer, project: project, force: true, approved: wrong),
                              "not the list the user was shown")
         XCTAssertTrue(FileManager.default.fileExists(atPath: innerPath + "/inner.txt"), "nothing removed")
 
-        let left = try WorkspaceService.delete(outer, project: project, force: true, approvedNested: check.nested)
+        let left = try WorkspaceService.delete(outer, project: project, force: true, approved: check)
         XCTAssertFalse(FileManager.default.fileExists(atPath: outer.path))
         XCTAssertFalse(Git.worktrees(in: project.path).contains { $0.branch == "eric/inner" || $0.branch == "eric/outer" })
         XCTAssertEqual(left.map(\.name), ["eric/inner"], "unmerged: kept")
         XCTAssertFalse(Git.branchExists("eric/outer", in: project.path), "no commits of its own: merged")
+    }
+
+    func testDeleteKeepsNestedWorktreeWhenOuterChangesAfterConfirmation() throws {
+        let outer = try create("outer-changed").workspace
+        let innerPath = outer.path + "/inner"
+        try Git.run(["worktree", "add", "-q", "-b", "eric/inner-changed", innerPath], in: project.path)
+        let check = WorkspaceService.inspect(outer, project: project, deletingBranch: false)
+        try "new".write(toFile: outer.path + "/later.txt", atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try WorkspaceService.delete(outer, project: project, force: true, approved: check))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: innerPath + "/README.md"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outer.path + "/later.txt"))
     }
 
     func testIgnoredNestedWorktreeCannotBeArchivedOrDeletedWithUncommittedFiles() throws {
@@ -232,7 +250,7 @@ final class WorkspaceServiceTests: XCTestCase {
         XCTAssertTrue(check.uncommitted.contains { $0.contains("inner/") })
         XCTAssertEqual(check.nested.map { WorkspaceService.canonical($0.path) }, [WorkspaceService.canonical(innerPath)])
         XCTAssertThrowsError(try WorkspaceService.removeWorktree(outer, project: project, force: false))
-        XCTAssertThrowsError(try WorkspaceService.delete(outer, project: project, force: true, approvedNested: check.nested))
+        XCTAssertThrowsError(try WorkspaceService.delete(outer, project: project, force: true, approved: check))
         XCTAssertTrue(FileManager.default.fileExists(atPath: innerPath + "/secret"))
     }
 
@@ -249,7 +267,7 @@ final class WorkspaceServiceTests: XCTestCase {
         XCTAssertThrowsError(try WorkspaceService.removeWorktree(ws, project: project, force: false))
         XCTAssertTrue(FileManager.default.fileExists(atPath: ws.path + "/untracked.txt"), "nothing lost without force")
 
-        try WorkspaceService.removeWorktree(ws, project: project, force: true)
+        try WorkspaceService.removeWorktree(ws, project: project, force: true, approved: check)
         XCTAssertFalse(FileManager.default.fileExists(atPath: ws.path))
     }
 
@@ -266,11 +284,11 @@ final class WorkspaceServiceTests: XCTestCase {
         let outer = try create("unreadable-outer").workspace
         let innerPath = outer.path + "/inner"
         try Git.run(["worktree", "add", "-q", "-b", "eric/nested", innerPath], in: project.path)
-        let approved = WorkspaceService.inspect(outer, project: project, deletingBranch: false).nested
+        let approved = WorkspaceService.inspect(outer, project: project, deletingBranch: false)
         let gitDirectory = try Git.run(["rev-parse", "--absolute-git-dir"], in: outer.path)
         try Data("corrupt".utf8).write(to: URL(fileURLWithPath: gitDirectory).appendingPathComponent("index"))
 
-        XCTAssertThrowsError(try WorkspaceService.delete(outer, project: project, force: true, approvedNested: approved))
+        XCTAssertThrowsError(try WorkspaceService.delete(outer, project: project, force: true, approved: approved))
         XCTAssertTrue(FileManager.default.fileExists(atPath: innerPath + "/README.md"))
     }
 
@@ -283,8 +301,31 @@ final class WorkspaceServiceTests: XCTestCase {
 
         let check = WorkspaceService.inspect(ws, project: project, deletingBranch: false)
         XCTAssertTrue(check.uncommitted.contains { $0.contains(".private/") })
+        XCTAssertTrue(check.uncommitted.contains { $0.hasSuffix(".private/secret") })
         XCTAssertThrowsError(try WorkspaceService.removeWorktree(ws, project: project, force: false))
         XCTAssertTrue(FileManager.default.fileExists(atPath: privateFolder + "/secret"))
+    }
+
+    func testForceRemovalKeepsFilesAddedAfterConfirmation() throws {
+        let ws = try create("changed-after-confirmation").workspace
+        try commit(".gitignore", ".private/\n", in: ws.path, "ignore private files")
+        let privateFolder = ws.path + "/.private"
+        try FileManager.default.createDirectory(atPath: privateFolder, withIntermediateDirectories: true)
+        try "first".write(toFile: privateFolder + "/first", atomically: true, encoding: .utf8)
+        let approved = WorkspaceService.inspect(ws, project: project, deletingBranch: false)
+        try "second".write(toFile: privateFolder + "/second", atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try WorkspaceService.removeWorktree(ws, project: project, force: true, approved: approved))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: privateFolder + "/second"))
+    }
+
+    func testForceRemovalKeepsFileEditedAfterConfirmation() throws {
+        let ws = try create("edited-after-confirmation").workspace
+        let approved = WorkspaceService.inspect(ws, project: project, deletingBranch: false)
+        try "SECRET=changed".write(toFile: ws.path + "/.env.local", atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try WorkspaceService.removeWorktree(ws, project: project, force: true, approved: approved))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: ws.path + "/.env.local"))
     }
 
     func testUnpushedCommitsAreReportedBeforeBranchDeletion() throws {

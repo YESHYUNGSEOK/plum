@@ -220,7 +220,7 @@ public enum Git {
     /// Uncommitted work in a worktree, one `git status --porcelain` line each.
     /// Includes untracked and ignored files, which removing the worktree would delete.
     public static func uncommittedChanges(in worktree: String) throws -> [String] {
-        try run(["status", "--porcelain", "--untracked-files=all", "--ignored=matching"], in: worktree)
+        try run(["status", "--porcelain", "--untracked-files=all", "--ignored=traditional"], in: worktree)
             .split(separator: "\n").map(String.init)
     }
 

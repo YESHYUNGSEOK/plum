@@ -19,6 +19,7 @@ public enum WorkspaceService {
         public var unpushed: [String] = []
         /// Other worktrees inside the folder, deepest first: removing it takes them too.
         public var nested: [Git.Worktree] = []
+        var fileSnapshot: [String]?
 
         public var isClean: Bool { uncommitted.isEmpty && unpushed.isEmpty }
     }
@@ -100,8 +101,41 @@ public enum WorkspaceService {
             }
         }
         if deletingBranch { check.unpushed = Git.unpushedCommits(on: workspace.branch, in: project.path) }
-        if !check.folderMissing, !workspace.isArchived { check.nested = nestedWorktrees(workspace, project: project) }
+        if !check.folderMissing, !workspace.isArchived {
+            check.nested = nestedWorktrees(workspace, project: project)
+            check.fileSnapshot = fileSnapshot(in: workspace.path, excluding: check.nested)
+        }
         return check
+    }
+
+    private static func fileSnapshot(in path: String, excluding nested: [Git.Worktree]) -> [String]? {
+        let root = URL(fileURLWithPath: canonical(path))
+        let canonicalRoot = root.path + "/"
+        let excluded = nested.map { String(canonical($0.path).dropFirst(canonicalRoot.count)) }
+        var failed = false
+        guard let files = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil,
+                                                         errorHandler: { _, _ in failed = true; return false }) else { return nil }
+        var snapshot: [String] = []
+        for case let file as URL in files {
+            guard file.path.hasPrefix(canonicalRoot) else { return nil }
+            let relative = String(file.path.dropFirst(canonicalRoot.count))
+            if relative == ".git" || excluded.contains(where: { relative == $0 || relative.hasPrefix($0 + "/") }) {
+                files.skipDescendants()
+                continue
+            }
+            var details = stat()
+            guard lstat(file.path, &details) == 0 else { failed = true; break }
+            let kind = details.st_mode & S_IFMT
+            let stamp = kind == S_IFDIR ? "" : "\(details.st_ino):\(details.st_size):\(details.st_mtimespec.tv_sec):\(details.st_mtimespec.tv_nsec):\(details.st_ctimespec.tv_sec):\(details.st_ctimespec.tv_nsec)"
+            snapshot.append("\(relative):\(kind):\(stamp)")
+            if snapshot.count > 200_000 { return nil }
+        }
+        return failed ? nil : snapshot.sorted()
+    }
+
+    private static func matchesApproval(_ changes: [String], in path: String, approved: RemovalCheck?) -> Bool {
+        guard let approved, let snapshot = approved.fileSnapshot else { return false }
+        return changes == approved.uncommitted && fileSnapshot(in: path, excluding: approved.nested) == snapshot
     }
 
     /// The worktrees git has inside a workspace's folder, deepest first.
@@ -113,18 +147,24 @@ public enum WorkspaceService {
     }
 
     /// Deletes as Orca does: the worktrees inside the folder first, deepest first,
-    /// then the workspace's own, each branch only if merged. `approvedNested` is
-    /// the list the user confirmed; if git now has another, nothing is removed.
+    /// then the workspace's own, each branch only if merged. `approved` is
+    /// what the user confirmed; if it changed, nothing is removed.
     /// Returns the branches kept because they aren't merged.
     public static func delete(_ workspace: Workspace, project: Project, force: Bool,
-                              approvedNested: [Git.Worktree]) throws -> [Git.Branch] {
+                              approved: RemovalCheck? = nil) throws -> [Git.Branch] {
         var kept: [Git.Branch] = []
         if !workspace.isArchived {
             if FileManager.default.fileExists(atPath: workspace.path) {
-                _ = try Git.uncommittedChanges(in: workspace.path)
+                if approved != nil, approved?.fileSnapshot == nil {
+                    throw GitError(message: String(localized: "워크트리의 파일을 확인하지 못해 삭제하지 않았습니다."))
+                }
+                let changes = try Git.uncommittedChanges(in: workspace.path)
+                if force, !matchesApproval(changes, in: workspace.path, approved: approved) {
+                    throw GitError(message: String(localized: "확인 후 워크트리의 파일이 바뀌었습니다. 다시 확인한 뒤 삭제하세요."))
+                }
             }
             let nested = FileManager.default.fileExists(atPath: workspace.path) ? nestedWorktrees(workspace, project: project) : []
-            guard nested == approvedNested else {
+            guard nested == (approved?.nested ?? []) else {
                 throw GitError(message: String(localized: "안쪽 워크트리 목록이 바뀌었습니다. 다시 확인한 뒤 삭제하세요."))
             }
             for inner in nested where !(try Git.uncommittedChanges(in: inner.path)).isEmpty {
@@ -134,7 +174,13 @@ public enum WorkspaceService {
                 try Git.removeWorktree(repository: project.path, path: inner.path, force: false)
                 if let branch = inner.branch, let left = Git.deleteBranchIfMerged(branch, in: project.path) { kept.append(left) }
             }
-            try removeWorktree(workspace, project: project, force: force)
+            let remaining = force && !nested.isEmpty ? try Git.uncommittedChanges(in: workspace.path) : approved?.uncommitted ?? []
+            if force, !Set(remaining).isSubset(of: Set(approved?.uncommitted ?? [])) {
+                throw GitError(message: String(localized: "확인 후 워크트리의 파일이 바뀌었습니다. 다시 확인한 뒤 삭제하세요."))
+            }
+            var afterApproval = approved
+            afterApproval?.uncommitted = remaining
+            try removeWorktree(workspace, project: project, force: force, approved: afterApproval)
         }
         if let left = Git.deleteBranchIfMerged(workspace.branch, in: project.path) { kept.append(left) }
         return kept
@@ -142,7 +188,8 @@ public enum WorkspaceService {
 
     /// Removes the worktree folder and git's record of it. Without `force`,
     /// uncommitted or ignored files are kept until their loss is confirmed.
-    public static func removeWorktree(_ workspace: Workspace, project: Project, force: Bool) throws {
+    public static func removeWorktree(_ workspace: Workspace, project: Project, force: Bool,
+                                      approved: RemovalCheck? = nil) throws {
         guard nestedWorktrees(workspace, project: project).isEmpty else {
             throw GitError(message: String(localized: "안쪽 워크트리가 있어 아카이브할 수 없습니다. 안쪽 워크트리를 먼저 정리하세요."))
         }
@@ -159,7 +206,13 @@ public enum WorkspaceService {
             throw GitError(message: String(localized: "프로젝트의 기본 체크아웃은 지울 수 없습니다."))
         }
         if FileManager.default.fileExists(atPath: workspace.path) {
+            if approved != nil, approved?.fileSnapshot == nil {
+                throw GitError(message: String(localized: "워크트리의 파일을 확인하지 못해 삭제하지 않았습니다."))
+            }
             let changes = try Git.uncommittedChanges(in: workspace.path)
+            if force, !matchesApproval(changes, in: workspace.path, approved: approved) {
+                throw GitError(message: String(localized: "확인 후 워크트리의 파일이 바뀌었습니다. 다시 확인한 뒤 삭제하세요."))
+            }
             if !force, !changes.isEmpty {
                 throw GitError(message: String(localized: "워크트리에 저장되지 않은 파일이 있습니다. 확인 후 다시 시도하세요."))
             }

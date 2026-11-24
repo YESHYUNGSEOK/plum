@@ -1415,10 +1415,10 @@ public final class AppModel {
     }
 
     /// Removes the worktree folder but keeps the branch and the record.
-    public func archive(_ id: UUID, force: Bool) async throws {
+    public func archive(_ id: UUID, force: Bool, approved: WorkspaceService.RemovalCheck? = nil) async throws {
         guard let workspace = state.workspaces.first(where: { $0.id == id }), !workspace.isArchived,
               let project = project(workspace.projectID), !project.isFolder else { return }
-        try await removeWorktree(of: workspace, project: project, force: force)
+        try await removeWorktree(of: workspace, project: project, force: force, approved: approved)
         if let index = state.workspaces.firstIndex(where: { $0.id == id }) { state.workspaces[index].isArchived = true }
         save()
         if selection == id { select(project.id) }
@@ -1428,7 +1428,7 @@ public final class AppModel {
     /// user was shown them), each branch only if merged, and their records.
     /// Returns the branches kept because they aren't merged.
     @discardableResult
-    public func delete(_ id: UUID, force: Bool, nested: [Git.Worktree] = []) async throws -> [Git.Branch] {
+    public func delete(_ id: UUID, force: Bool, approved: WorkspaceService.RemovalCheck? = nil) async throws -> [Git.Branch] {
         guard let workspace = state.workspaces.first(where: { $0.id == id }), let project = project(workspace.projectID) else { return [] }
         if project.isFolder { // only Plum's record: the folder is the project's, shared by its workspaces
             closeAllTabs(in: id)
@@ -1440,10 +1440,10 @@ public final class AppModel {
         busy.insert(id)
         defer { busy.remove(id) }
         let kept = try await Task.detached {
-            try WorkspaceService.delete(workspace, project: project, force: force, approvedNested: nested)
+            try WorkspaceService.delete(workspace, project: project, force: force, approved: approved)
         }.value
         let gone = state.workspaces.filter { other in
-            other.id == id || (other.projectID == project.id && nested.contains { WorkspaceService.samePath($0.path, other.path) })
+            other.id == id || (other.projectID == project.id && (approved?.nested ?? []).contains { WorkspaceService.samePath($0.path, other.path) })
         }.map(\.id)
         // Only now that the folders are gone: if git refused, shells and agents stay.
         for other in gone { closeAllTabs(in: other) }
@@ -1453,10 +1453,13 @@ public final class AppModel {
         return kept
     }
 
-    private func removeWorktree(of workspace: Workspace, project: Project, force: Bool) async throws {
+    private func removeWorktree(of workspace: Workspace, project: Project, force: Bool,
+                                approved: WorkspaceService.RemovalCheck?) async throws {
         busy.insert(workspace.id)
         defer { busy.remove(workspace.id) }
-        try await Task.detached { try WorkspaceService.removeWorktree(workspace, project: project, force: force) }.value
+        try await Task.detached {
+            try WorkspaceService.removeWorktree(workspace, project: project, force: force, approved: approved)
+        }.value
         // Only once the folder is really gone: if git refused, the user's
         // shells and agents must still be there.
         closeAllTabs(in: workspace.id)

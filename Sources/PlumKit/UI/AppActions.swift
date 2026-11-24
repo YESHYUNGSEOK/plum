@@ -80,7 +80,9 @@ enum AppActions {
                     destructive: !check.uncommitted.isEmpty))
                 else { return }
             }
-            await run(model) { try await model.archive(workspace.id, force: !check.uncommitted.isEmpty) }
+            await run(model) {
+                try await model.archive(workspace.id, force: !check.uncommitted.isEmpty, approved: check)
+            }
         }
     }
 
@@ -103,7 +105,9 @@ enum AppActions {
                 action: check.isClean ? String(localized: "삭제") : String(localized: "잃어도 좋으니 삭제"), destructive: true))
             else { return }
             var kept: [Git.Branch] = []
-            await run(model) { kept = try await model.delete(workspace.id, force: !check.uncommitted.isEmpty, nested: check.nested) }
+            await run(model) {
+                kept = try await model.delete(workspace.id, force: !check.uncommitted.isEmpty, approved: check)
+            }
             if let project = model.project(workspace.projectID) { await offerToDelete(kept, in: project, model) }
         }
     }
