@@ -40,6 +40,8 @@ public enum StatusMessage {
 /// 5-hour ("session") and weekly limits is used, in percent.
 public struct AgentReport: Equatable, Sendable {
     public var model: String?
+    /// How hard it thinks ("high"), where the agent says.
+    public var effort: String?
     public var session: Double?
     public var weekly: Double?
     /// When each limit starts over.
@@ -55,7 +57,8 @@ public struct AgentReport: Equatable, Sendable {
         func used(_ window: String) -> Double? { ((limits?[window] as? [String: Any])?["used_percentage"] as? NSNumber)?.doubleValue }
         func resets(_ window: String) -> Date? { date((limits?[window] as? [String: Any])?["resets_at"]) }
         let model = ((input["model"] as? [String: Any])?["display_name"] as? String).map { sanitizeForDisplay($0, limit: 40) }
-        return (tab, AgentReport(model: model, session: used("five_hour"), weekly: used("seven_day"),
+        let effort = ((input["effort"] as? [String: Any])?["level"] as? String).map { sanitizeForDisplay($0, limit: 12) }
+        return (tab, AgentReport(model: model, effort: effort, session: used("five_hour"), weekly: used("seven_day"),
                                  sessionResets: resets("five_hour"), weeklyResets: resets("seven_day")))
     }
 
@@ -74,7 +77,9 @@ public struct AgentReport: Equatable, Sendable {
             let end = data[at.upperBound...].firstIndex(of: 0x0A) ?? data.endIndex
             return ((try? JSONSerialization.jsonObject(with: data[start..<end])) as? [String: Any])?["payload"] as? [String: Any]
         }
-        var report = AgentReport(model: (last("turn_context")?["model"] as? String).map { sanitizeForDisplay($0, limit: 40) })
+        let turn = last("turn_context")
+        var report = AgentReport(model: (turn?["model"] as? String).map { sanitizeForDisplay($0, limit: 40) },
+                                 effort: (turn?["effort"] as? String).map { sanitizeForDisplay($0, limit: 12) })
         let limits = last("token_count")?["rate_limits"] as? [String: Any]
         for key in ["primary", "secondary"] {
             guard let window = limits?[key] as? [String: Any], let used = (window["used_percent"] as? NSNumber)?.doubleValue,
@@ -118,6 +123,100 @@ public enum CodexSessions {
 
     private static func modified(_ file: URL) -> Date {
         (try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+    }
+}
+
+/// Claude Code's session files (`projects/<folder>/<session>.jsonl` in its
+/// config folder): where a Claude that wasn't started with Plum's settings
+/// (typed at a prompt, or running since before) still says its model.
+/// ponytail: by folder and recency, as CodexSessions; and Claude names the
+/// folder with every character that isn't a letter or digit turned to "-",
+/// so two folders can share one.
+public enum ClaudeSessions {
+    public static func report(in folder: String, environment: [String: String] = ProcessInfo.processInfo.environment,
+                              home: String = NSHomeDirectory()) -> AgentReport? {
+        let config = environment["CLAUDE_CONFIG_DIR"] ?? (home as NSString).appendingPathComponent(".claude")
+        let name = String(folder.unicodeScalars.map { $0.isASCII && CharacterSet.alphanumerics.contains($0) ? Character($0) : "-" })
+        let sessions = URL(fileURLWithPath: config).appendingPathComponent("projects").appendingPathComponent(name)
+        let files = ((try? FileManager.default.contentsOfDirectory(at: sessions, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [])
+            .filter { $0.pathExtension == "jsonl" }
+        func modified(_ file: URL) -> Date {
+            (try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+        }
+        guard let newest = files.max(by: { modified($0) < modified($1) }),
+              let data = try? Data(contentsOf: newest, options: .mappedIfSafe) else { return nil }
+        // The last answer's model and the last turn's effort, found from the end: `"model":"claude-opus-5-5"`.
+        func last(_ marker: String) -> String? {
+            guard let at = data.range(of: Data(marker.utf8), options: .backwards),
+                  let close = data[at.upperBound...].prefix(60).firstIndex(of: UInt8(ascii: "\"")) else { return nil }
+            return String(decoding: data[at.upperBound..<close], as: UTF8.self)
+        }
+        guard let model = last("\"model\":\"claude-") else { return nil }
+        return AgentReport(model: displayName(model), effort: last("\"effort\":\"").map { sanitizeForDisplay($0, limit: 12) })
+    }
+
+    /// "opus-5-5-20270101" → "Opus 5.5", as Claude Code's own display name.
+    static func displayName(_ id: String) -> String {
+        let parts = id.split(separator: "-").map(String.init).filter { !($0.count == 8 && $0.allSatisfy(\.isNumber)) }
+        guard let family = parts.first else { return id }
+        let version = parts.dropFirst().joined(separator: ".")
+        return sanitizeForDisplay(family.capitalized + (version.isEmpty ? "" : " " + version), limit: 40)
+    }
+}
+
+/// The plan's limits for Claude, asked of Anthropic as Orca does, with the
+/// login Claude Code keeps: sessions that weren't started with Plum's
+/// settings have no status line to say them with. The token goes to
+/// api.anthropic.com alone and is neither kept nor logged; Plum never
+/// refreshes or writes the login (a stale one just gets no answer). The
+/// endpoint is not a documented one.
+public enum ClaudeUsage {
+    static let endpoint = URL(string: "https://api.anthropic.com/api/oauth/usage")!
+
+    public static func fetch() async -> AgentReport? {
+        guard let token = token() else { return nil }
+        var request = URLRequest(url: endpoint, timeoutInterval: 10)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        request.setValue("Plum/\(Updates.current)", forHTTPHeaderField: "User-Agent")
+        guard let (data, response) = try? await URLSession(configuration: .ephemeral).data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        return parse(data)
+    }
+
+    /// `{"five_hour":{"utilization":12.0,"resets_at":"2026-11-29T01:00:00.219686+00:00"},"seven_day":{…}}`, either possibly null.
+    public static func parse(_ data: Data) -> AgentReport? {
+        guard let answer = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        func window(_ key: String) -> (Double?, Date?) {
+            let window = answer[key] as? [String: Any]
+            // Fractions of a second, which the date parser doesn't take, are dropped.
+            let resets = (window?["resets_at"] as? String).flatMap {
+                ISO8601DateFormatter().date(from: $0.replacingOccurrences(of: #"\.\d+"#, with: "", options: .regularExpression))
+            }
+            return ((window?["utilization"] as? NSNumber)?.doubleValue, resets)
+        }
+        let (session, weekly) = (window("five_hour"), window("seven_day"))
+        return AgentReport(session: session.0, weekly: weekly.0, sessionResets: session.1, weeklyResets: weekly.1)
+    }
+
+    /// Claude Code's login: in the keychain on a Mac, as it reads it itself (through `security`), or in its config folder.
+    static func token(environment: [String: String] = ProcessInfo.processInfo.environment, home: String = NSHomeDirectory()) -> String? {
+        func access(_ data: Data?) -> String? {
+            guard let data, let login = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["claudeAiOauth"] as? [String: Any] else { return nil }
+            return login["accessToken"] as? String
+        }
+        let process = Process(), output = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = ["find-generic-password", "-s", "Claude Code-credentials", "-w"]
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        if (try? process.run()) != nil {
+            let found = output.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            if process.terminationStatus == 0, let token = access(found) { return token }
+        }
+        let folder = environment["CLAUDE_CONFIG_DIR"] ?? (home as NSString).appendingPathComponent(".claude")
+        return access(FileManager.default.contents(atPath: (folder as NSString).appendingPathComponent(".credentials.json")))
     }
 }
 

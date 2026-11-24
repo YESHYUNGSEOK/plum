@@ -5,10 +5,10 @@ import XCTest
 final class AgentReportTests: XCTestCase {
     func testClaudeStatusLineInput() throws {
         let tab = UUID()
-        let json = #"{"session_id":"s","model":{"id":"claude-opus-5-5","display_name":"Opus 5.5"},"rate_limits":{"five_hour":{"used_percentage":41.6,"resets_at":1795500000},"seven_day":{"used_percentage":18,"resets_at":1795900000}}}"#
+        let json = #"{"session_id":"s","model":{"id":"claude-opus-5-5","display_name":"Opus 5.5"},"effort":{"level":"high"},"rate_limits":{"five_hour":{"used_percentage":41.6,"resets_at":1795500000},"seven_day":{"used_percentage":18,"resets_at":1795900000}}}"#
         let said = try XCTUnwrap(AgentReport.parse("\(tab.uuidString) statusline \(json)"))
         XCTAssertEqual(said.tab, tab)
-        XCTAssertEqual(said.report, AgentReport(model: "Opus 5.5", session: 41.6, weekly: 18, sessionResets: Date(timeIntervalSince1970: 1795500000),
+        XCTAssertEqual(said.report, AgentReport(model: "Opus 5.5", effort: "high", session: 41.6, weekly: 18, sessionResets: Date(timeIntervalSince1970: 1795500000),
                                                 weeklyResets: Date(timeIntervalSince1970: 1795900000)))
 
         // An API key user, or before the first answer: no limits; a model still.
@@ -31,7 +31,7 @@ final class AgentReportTests: XCTestCase {
                 #"{"type":"session_meta","payload":{"id":"x","cwd":"\#(folder)"}}"#,
                 #"{"type":"turn_context","payload":{"cwd":"\#(folder)","model":"old-model"}}"#,
                 #"{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":90.0,"window_minutes":300},"secondary":{"used_percent":1.0,"window_minutes":10080}}}}"#,
-                #"{"type":"turn_context","payload":{"cwd":"\#(folder)","model":"\#(model)"}}"#,
+                #"{"type":"turn_context","payload":{"cwd":"\#(folder)","model":"\#(model)","effort":"high"}}"#,
                 #"{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":\#(weekly).0,"window_minutes":10080,"resets_at":1795847887},"secondary":null}}}"#,
             ]
             try Data(lines.joined(separator: "\n").utf8).write(to: day.appendingPathComponent("rollout-\(name).jsonl"))
@@ -40,7 +40,7 @@ final class AgentReportTests: XCTestCase {
         try session("b", folder: "/work/other", model: "gpt-y", weekly: 60)
 
         // The last turn's model, and only the windows the last report had.
-        XCTAssertEqual(CodexSessions.report(in: "/work/한글 폴더", home: home.path, now: now), AgentReport(model: "gpt-x", weekly: 25, weeklyResets: Date(timeIntervalSince1970: 1795847887)))
+        XCTAssertEqual(CodexSessions.report(in: "/work/한글 폴더", home: home.path, now: now), AgentReport(model: "gpt-x", effort: "high", weekly: 25, weeklyResets: Date(timeIntervalSince1970: 1795847887)))
         XCTAssertEqual(CodexSessions.report(in: "/work/other", home: home.path, now: now)?.model, "gpt-y")
         XCTAssertNil(CodexSessions.report(in: "/work/none", home: home.path, now: now))
     }
@@ -79,5 +79,32 @@ final class AgentReportTests: XCTestCase {
         process.waitUntilExit()
         XCTAssertEqual(String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self), "{\"MODEL\":{\"DISPLAY_NAME\":\"OPUS 5.5\"},\n\"X\":1}")
         wait(for: [heard], timeout: 3)
+    }
+
+    func testAClaudeNotStartedByPlumStillSaysItsModelInItsSessionFile() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("plum-claude-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let folder = "/Users/me/work/한글.repo"
+        let sessions = home.appendingPathComponent(".claude/projects/-Users-me-work----repo")
+        try FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
+        let lines = [
+            #"{"type":"assistant","message":{"model":"claude-sonnet-5-5","content":[]}}"#,
+            #"{"type":"user","message":{"content":"which \"model\":\"claude-fake is this?"}}"#,
+            #"{"type":"assistant","message":{"model":"claude-opus-5-5-20270101","content":[]},"effort":"medium"}"#,
+            #"{"type":"assistant","message":{"model":"<synthetic>","content":[]}}"#,
+        ]
+        try Data(lines.joined(separator: "\n").utf8).write(to: sessions.appendingPathComponent("s.jsonl"))
+        XCTAssertEqual(ClaudeSessions.report(in: folder, environment: [:], home: home.path), AgentReport(model: "Opus 5.5", effort: "medium"))
+        XCTAssertNil(ClaudeSessions.report(in: "/Users/me/elsewhere", environment: [:], home: home.path))
+        XCTAssertEqual(ClaudeSessions.displayName("fable-5-2"), "Fable 5.2")
+    }
+
+    func testAnthropicsUsageAnswer() throws {
+        let answer = #"{"five_hour":null,"seven_day":{"utilization":51.0,"resets_at":"2026-11-29T01:00:00.219686+00:00"},"extra_usage":{"is_enabled":false}}"#
+        let report = try XCTUnwrap(ClaudeUsage.parse(Data(answer.utf8)))
+        XCTAssertNil(report.session)
+        XCTAssertEqual(report.weekly, 51)
+        XCTAssertEqual(report.weeklyResets, ISO8601DateFormatter().date(from: "2026-11-29T01:00:00Z"))
+        XCTAssertNil(ClaudeUsage.parse(Data("rate limited".utf8)))
     }
 }

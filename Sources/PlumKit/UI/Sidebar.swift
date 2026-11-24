@@ -454,21 +454,19 @@ private struct ProjectSection: View {
     }
 }
 
-/// How much of each agent's plan limits is used, as the agents last said:
-/// the agent's icon, then a bar for the session (5-hour) and the weekly limit.
+/// How much of each agent's weekly plan limit is used, as last known: the
+/// agent's icon, then a bar. (The 5-hour limit the agents also report is
+/// no longer in use, and isn't shown.)
 private struct PlanUsage: View {
     let limits: [TabProgram: AgentReport]
 
     var body: some View {
-        let hasSession = limits.values.contains { $0.session != nil }
         VStack(alignment: .leading, spacing: 4) {
             ForEach([TabProgram.claude, .codex]) { agent in
-                if let plan = limits[agent] {
+                if let plan = limits[agent], let weekly = plan.weekly {
                     HStack(spacing: 8) {
                         Image(nsImage: agent.icon).resizable().frame(width: 12, height: 12)
-                        // An agent without a session limit keeps the column, so weekly sits under weekly.
-                        if let session = plan.session { bar("세션", session, resets: plan.sessionResets) } else if hasSession { bar("세션", 0).hidden() }
-                        if let weekly = plan.weekly { bar("주간", weekly, resets: plan.weeklyResets) }
+                        bar("주간", weekly, resets: plan.weeklyResets)
                     }
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel(Text(verbatim: agent.name))

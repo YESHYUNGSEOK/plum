@@ -3,7 +3,9 @@
 /// ZDOTDIR back first thing and reads their own `.zshenv`. Everything after
 /// (`.zprofile`, `.zshrc`) is read from the user's folder as always.
 ///
-/// Its one addition: prompts are marked (OSC 133), so the view can jump
+/// It adds a `claude` function, so a Claude typed at the prompt gets Plum's
+/// hooks and status line like one started from a Claude tab, and marks
+/// prompts (OSC 133), so the view can jump
 /// from command to command. The marks start at the second prompt: hooks
 /// are put in place once the first prompt is up, so nothing is printed
 /// while the user's own setup runs (Powerlevel10k's instant prompt
@@ -29,6 +31,14 @@ enum ShellIntegration {
         preexec_functions+=(_plum_mark_output)
       }
       precmd_functions+=(_plum_install_marks)
+      # `claude` typed here reports to Plum as one started from a Claude tab does.
+      claude() {
+        if [[ -n "$PLUM_CLAUDE_SETTINGS" && " $* " != *" --settings "* ]]; then
+          command claude --settings "$PLUM_CLAUDE_SETTINGS" "$@"
+        else
+          command claude "$@"
+        fi
+      }
     fi
     """#
 }

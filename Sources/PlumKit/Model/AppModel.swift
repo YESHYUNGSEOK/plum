@@ -99,6 +99,9 @@ public final class AppModel {
     /// Each agent tab's model and each agent's plan limits, as last reported.
     public private(set) var models: [UUID: String] = [:]
     public private(set) var limits: [TabProgram: AgentReport] = [:]
+    /// Tabs whose Claude reports through Plum's status line: their session files aren't read.
+    @ObservationIgnored private var toldByStatusLine: Set<UUID> = []
+    @ObservationIgnored private var claudeUsageAsked = Date.distantPast
     public var sheet: AppSheet?
     /// Each project's own icon from its repository (ProjectIcon), if it has one.
     public private(set) var projectIcons: [UUID: NSImage] = [:]
@@ -159,18 +162,42 @@ public final class AppModel {
     /// What an agent said of itself. Unknown tabs are ignored: the socket is external input.
     func take(_ report: AgentReport, from agent: TabProgram, tab id: UUID) {
         guard tab(id) != nil else { return }
-        if let model = report.model, models[id] != model { models[id] = model }
+        // "Opus 5.5 · high": the model, and how hard it thinks where the agent says.
+        if let model = report.model {
+            let label = [model, report.effort].compactMap { $0 }.joined(separator: " · ")
+            if models[id] != label { models[id] = label }
+        }
         var plan = report
-        plan.model = nil
+        (plan.model, plan.effort) = (nil, nil)
         if plan != AgentReport(), limits[agent] != plan { limits[agent] = plan }
     }
 
-    /// Codex says nothing through its hooks: its session file is read when its state changes.
-    private func readCodexReport(of tab: TerminalTab, in workspace: Workspace) {
+    /// What an agent's own session file says, read in the background: Codex
+    /// says nothing through its hooks, and a Claude that wasn't started with
+    /// Plum's settings (typed at a prompt, or running since before) has no
+    /// status line to say it with. Such a Claude gives its model only: the
+    /// plan's limits come from a status line alone.
+    private func readReport(of tab: TerminalTab) {
+        guard let agent = tab.agent, !toldByStatusLine.contains(tab.id), let workspace = workspace(tab.workspaceID) else { return }
         let id = tab.id, folder = tab.session.currentDirectory() ?? workspace.path
         Task {
-            let report = await Task.detached(priority: .utility) { CodexSessions.report(in: folder) }.value
-            if let report { take(report, from: .codex, tab: id) }
+            let report = await Task.detached(priority: .utility) {
+                agent == .codex ? CodexSessions.report(in: folder) : ClaudeSessions.report(in: folder)
+            }.value
+            if let report { take(report, from: agent, tab: id) }
+        }
+        if agent == .claude { askClaudeUsage() }
+    }
+
+    /// The plan's limits for Claude, when no Claude tab says them through a
+    /// status line: asked of Anthropic, every five minutes at most.
+    private func askClaudeUsage() {
+        guard Date().timeIntervalSince(claudeUsageAsked) > 300 else { return }
+        claudeUsageAsked = Date()
+        Task {
+            if let report = await ClaudeUsage.fetch(), report != AgentReport(), toldByStatusLine.isEmpty, limits[.claude] != report {
+                limits[.claude] = report
+            }
         }
     }
 
@@ -191,7 +218,10 @@ public final class AppModel {
                 MainActor.assumeIsolated { self?.setStatus(status, message: message, tab: tab, structured: true) }
             },
             onReport: { [weak self] tab, report in
-                MainActor.assumeIsolated { self?.take(report, from: .claude, tab: tab) }
+                MainActor.assumeIsolated {
+                    self?.toldByStatusLine.insert(tab)
+                    self?.take(report, from: .claude, tab: tab)
+                }
             },
             debugHandler: debug ? { [weak self] line in
                 MainActor.assumeIsolated { self?.handleDebug(line) ?? "" }
@@ -246,6 +276,11 @@ public final class AppModel {
             if tab.agent != agent {
                 tab.agent = agent
                 tab.activeAt = .now
+                if agent == nil { models[tab.id] = nil; toldByStatusLine.remove(tab.id) }
+                readReport(of: tab)
+            } else if beats % 15 == 0 {
+                // Every 30 s: a model changed mid-session, limits that moved.
+                readReport(of: tab)
             }
         }
         for project in state.projects {
@@ -787,9 +822,7 @@ public final class AppModel {
         statuses[id] = effective == .idle ? nil : effective
         tab.activeAt = .now
         refreshChanges(tab.workspaceID) // an agent that stops has usually just edited files
-        if tab.agent == .codex, let workspace = workspace(tab.workspaceID) {
-            readCodexReport(of: tab, in: workspace)
-        }
+        readReport(of: tab)
 
         if !visible, effective == .waiting || effective == .done, let workspace = workspace(tab.workspaceID) {
             let project = project(workspace.projectID)?.name ?? ""

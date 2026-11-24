@@ -341,6 +341,5 @@
 "폴더" = "Folder";
 "폴더로 열기" = "Open as Folder";
 "Plum의 목록에서만 지웁니다. 폴더는 그대로 남습니다." = "Only Plum's list changes. The folder stays as it is.";
-"세션" = "session";
 "%@ 초기화 (%@)" = "Resets %@ (%@)";
 "주간" = "week";
