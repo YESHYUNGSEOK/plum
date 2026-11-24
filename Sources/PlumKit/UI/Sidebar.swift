@@ -104,7 +104,7 @@ struct SidebarView: View {
                 }
             }
             HStack {
-                if model.state.settings.showAgentUsage { PlanUsage(limits: model.limits) }
+                PlanUsage(limits: model.limits)
                 Spacer()
                 IconButton(systemName: "slider.horizontal.3", label: String(localized: "설정")) { model.sheet = .settings }
             }
@@ -540,7 +540,7 @@ private struct WorkspaceRow: View {
                         TabLine(
                             tab: tab, status: model.statuses[tab.id] ?? .idle,
                             isActive: isSelected && model.activeTabs[workspace.id] == tab.id,
-                            model: model.state.settings.showAgentUsage ? model.models[tab.id] : nil,
+                            model: model.models[tab.id],
                             show: { model.reveal(tab: tab.id) },
                             close: { AppActions.closeTab(model, tab.id) })
                         .transition(.opacity)
@@ -793,7 +793,7 @@ private struct TabLine: View {
     let status: AgentStatus
     /// The tab on screen now.
     let isActive: Bool
-    /// The agent's model, shown under the title (Settings).
+    /// The agent's model, shown under the title.
     var model: String?
     let show: () -> Void
     let close: () -> Void

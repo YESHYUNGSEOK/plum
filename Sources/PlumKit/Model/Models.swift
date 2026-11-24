@@ -105,9 +105,6 @@ public struct AppSettings: Codable, Equatable {
     public var optionAsMeta = false
     /// zsh marks its prompts for Plum (⌘↑ and ⌘↓ between commands).
     public var shellIntegration = true
-    /// Each agent tab's model in the sidebar, and the plan's session and
-    /// weekly limits at its foot. Off: Plum asks the agents for neither.
-    public var showAgentUsage = false
     public var cursorShape = TerminalSession.CursorShape.block
     public var cursorBlinks = false
     /// Output kept to scroll back to, per tab.
@@ -148,7 +145,6 @@ public struct AppSettings: Codable, Equatable {
         trustWorkspaces = try container.decodeIfPresent(Bool.self, forKey: .trustWorkspaces) ?? defaults.trustWorkspaces
         optionAsMeta = try container.decodeIfPresent(Bool.self, forKey: .optionAsMeta) ?? defaults.optionAsMeta
         shellIntegration = try container.decodeIfPresent(Bool.self, forKey: .shellIntegration) ?? defaults.shellIntegration
-        showAgentUsage = try container.decodeIfPresent(Bool.self, forKey: .showAgentUsage) ?? defaults.showAgentUsage
         cursorShape = (try? container.decodeIfPresent(TerminalSession.CursorShape.self, forKey: .cursorShape)) ?? defaults.cursorShape
         cursorBlinks = try container.decodeIfPresent(Bool.self, forKey: .cursorBlinks) ?? defaults.cursorBlinks
         scrollbackMB = try container.decodeIfPresent(Int.self, forKey: .scrollbackMB) ?? defaults.scrollbackMB

@@ -341,7 +341,6 @@
 "폴더" = "Folder";
 "폴더로 열기" = "Open as Folder";
 "Plum의 목록에서만 지웁니다. 폴더는 그대로 남습니다." = "Only Plum's list changes. The folder stays as it is.";
-"에이전트의 모델과 사용량 표시: 탭 아래에 모델, 사이드바 아래에 세션·주간 한도 (새로 시작한 Claude부터)" = "Show each agent's model and usage: the model under its tab, session and weekly limits at the foot of the sidebar (Claude sessions started after this)";
 "세션" = "session";
 "%@ 초기화 (%@)" = "Resets %@ (%@)";
 "주간" = "week";
