@@ -1,0 +1,21 @@
+Sources/PlumKit/Model/StatusServer.swift
+  s_b0ba35075bf01c::t_9ff5d611a20b6a 348-350
+Tests/PlumKitTests/CodexHooksTests.swift
+  s_b0ba35075bf01c::t_8e432ca86f59eb 55-74
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b1f9423a54a3e7f403f519db8ffa57fc25e8ef5b",
+  "prompts": {},
+  "sessions": {
+    "s_b0ba35075bf01c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6e5b7bb4-b615-4f07-9131-5049dfbd04a7",
+        "model": "unknown"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    }
+  }
+}
