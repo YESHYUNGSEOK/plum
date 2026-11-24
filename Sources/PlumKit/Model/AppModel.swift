@@ -98,7 +98,20 @@ public final class AppModel {
     public var availableUpdate: Updates.Release?
     /// Each agent tab's model and each agent's plan limits, as last reported.
     public private(set) var models: [UUID: String] = [:]
-    public private(set) var limits: [TabProgram: AgentReport] = [:]
+    /// Kept between launches (UserDefaults): what was last known shows at
+    /// once, until the agents or Anthropic say something newer.
+    public private(set) var limits: [TabProgram: AgentReport] = AppModel.keptLimits() {
+        didSet {
+            guard limits != oldValue, let data = try? JSONEncoder().encode(Dictionary(uniqueKeysWithValues: limits.map { ($0.key.rawValue, $0.value) })) else { return }
+            UserDefaults.standard.set(data, forKey: "planLimits")
+        }
+    }
+
+    private static func keptLimits() -> [TabProgram: AgentReport] {
+        guard let data = UserDefaults.standard.data(forKey: "planLimits"),
+              let kept = try? JSONDecoder().decode([String: AgentReport].self, from: data) else { return [:] }
+        return Dictionary(uniqueKeysWithValues: kept.compactMap { key, value in TabProgram(rawValue: key).map { ($0, value) } })
+    }
     /// Tabs whose Claude reports through Plum's status line: their session files aren't read.
     @ObservationIgnored private var toldByStatusLine: Set<UUID> = []
     @ObservationIgnored private var claudeUsageAsked = Date.distantPast
@@ -195,9 +208,12 @@ public final class AppModel {
         guard Date().timeIntervalSince(claudeUsageAsked) > 300 else { return }
         claudeUsageAsked = Date()
         Task {
-            if let report = await ClaudeUsage.fetch(), report != AgentReport(), toldByStatusLine.isEmpty, limits[.claude] != report {
-                limits[.claude] = report
+            guard let report = await ClaudeUsage.fetch(), report != AgentReport() else {
+                // No answer (refused for asking too often, offline, a stale login): again in a minute, not five.
+                claudeUsageAsked = Date().addingTimeInterval(-240)
+                return
             }
+            if limits[.claude] != report { limits[.claude] = report }
         }
     }
 

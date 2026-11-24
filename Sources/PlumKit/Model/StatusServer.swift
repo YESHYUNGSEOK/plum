@@ -44,7 +44,7 @@ public enum StatusMessage {
 /// report to Plum without touching the user's own configuration.
 /// What an agent says of itself: its model, and how much of the plan's
 /// 5-hour ("session") and weekly limits is used, in percent.
-public struct AgentReport: Equatable, Sendable {
+public struct AgentReport: Equatable, Sendable, Codable {
     public var model: String?
     /// How hard it thinks ("high"), where the agent says.
     public var effort: String?
