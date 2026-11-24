@@ -173,8 +173,7 @@ enum AppActions {
         }
     }
 
-    /// Downloads and installs a newer release, then restarts: the toast's
-    /// "Install". Terminals and their programs carry on in the host.
+    /// Downloads and installs a newer release, then restarts: the toast's "Install".
     static func installUpdate(_ model: AppModel, _ release: Updates.Release) async {
         model.availableUpdate = nil
         if let reason = Updates.cannotInstall(release) {
@@ -185,7 +184,14 @@ enum AppActions {
         defer { installing = false }
         model.notice = String(localized: "업데이트를 내려받는 중…")
         do {
-            let app = try await Updates.install(release)
+            let archive = try await Updates.fetch(release)
+            guard !model.hasTerminalsUpdateCannotRestore else {
+                model.notice = nil
+                model.availableUpdate = release
+                model.errorMessage = String(localized: "실행 중인 터미널을 새 버전에서 이어받을 수 없어 업데이트를 보류했습니다. 해당 터미널을 닫은 뒤 다시 설치해 주세요.")
+                return
+            }
+            let app = try Updates.install(archive.zip, signature: archive.signature, version: release.version)
             // Still true if the quit is cancelled.
             model.notice = String(localized: "업데이트를 설치했습니다. Plum을 다시 시작하면 적용됩니다.")
             relaunch(app)

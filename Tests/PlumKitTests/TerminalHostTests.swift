@@ -344,7 +344,10 @@ final class TerminalHostTests: XCTestCase {
     func testHardenedHostUsesADifferentSocketFromLegacyHost() {
         let store = Store(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
         XCTAssertTrue(TerminalHost.legacySocketPath(for: store).contains("plum-host-1-"))
-        XCTAssertTrue(TerminalHost.socketPath(for: store).contains("plum-host-4-"))
+        XCTAssertTrue(TerminalHost.socketPath(for: store).contains("plum-host-5-"))
+        if let hash = TerminalHost.ownCodeHash() {
+            XCTAssertTrue(TerminalHost.socketPath(for: store).hasSuffix("-\(hash.prefix(12)).sock"))
+        }
         XCTAssertNotEqual(TerminalHost.legacySocketPath(for: store), TerminalHost.socketPath(for: store))
     }
 

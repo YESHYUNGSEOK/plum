@@ -138,12 +138,12 @@ public enum Updates {
         return nil
     }
 
-    /// Downloads, checks and swaps in `release`; returns where the new app is.
-    public static func install(_ release: Release, app: URL = Bundle.main.bundleURL) async throws -> URL {
+    /// Downloads release files so the caller can check live terminals before swapping the app.
+    static func fetch(_ release: Release) async throws -> (zip: Data, signature: Data) {
         guard let archive = release.archive else { throw InstallError.noArchive }
         let signature = try await download(archive.signature, limit: 4 * 1024)
         let zip = try await download(archive.zip, limit: 64 * 1024 * 1024)
-        return try install(zip, signature: signature, version: release.version, app: app)
+        return (zip, signature)
     }
 
     /// A failed download (rate limit, outage) is not a bad signature.

@@ -27,7 +27,7 @@ private func csopsAuditToken(_ pid: pid_t, _ ops: UInt32, _ data: UnsafeMutableR
 public final class TerminalHost {
     /// Bumped whenever the protocol or what the host does changes: a host
     /// started by an older Plum keeps its own socket and its own terminals.
-    public static let version = 4
+    public static let version = 5
 
     private let socketPath: String
     private let lock = NSLock()
@@ -43,19 +43,20 @@ public final class TerminalHost {
     /// folder (a socket path must stay under 104 bytes), named after the
     /// store so a test instance never reaches the user's terminals.
     public static func socketPath(for store: Store) -> String {
-        socketPath(for: store, version: version)
+        socketPath(for: store, version: version, codeHash: ownCodeHash())
     }
 
     public static func legacySocketPath(for store: Store) -> String {
         socketPath(for: store, version: 1)
     }
 
-    private static func socketPath(for store: Store, version: Int) -> String {
+    private static func socketPath(for store: Store, version: Int, codeHash: String? = nil) -> String {
         var hash: UInt64 = 0xCBF2_9CE4_8422_2325 // FNV-1a: the same every launch, unlike hashValue
         for byte in store.directory.standardizedFileURL.path.utf8 {
             hash = (hash ^ UInt64(byte)) &* 0x100_0000_01B3
         }
-        return NSTemporaryDirectory() + "plum-host-\(version)-\(String(hash, radix: 16)).sock"
+        let suffix = codeHash.map { "-\($0.prefix(12))" } ?? ""
+        return NSTemporaryDirectory() + "plum-host-\(version)-\(String(hash, radix: 16))\(suffix).sock"
     }
 
     /// Runs the host until it has had no terminals for a minute.
@@ -236,6 +237,11 @@ public final class TerminalHost {
     }
 
     private static func sameCode(as pid: pid_t) -> Bool {
+        guard let hash = ownCodeHash(), matchesCode(as: getpid(), hash: hash) else { return false }
+        return matchesCode(as: pid, hash: hash)
+    }
+
+    static func ownCodeHash() -> String? {
         let flags = SecCSFlags(rawValue: 0)
         var owner: SecCode?
         var staticOwner: SecStaticCode?
@@ -244,10 +250,8 @@ public final class TerminalHost {
               SecCodeCopyStaticCode(owner, flags, &staticOwner) == errSecSuccess, let staticOwner,
               SecCodeCopySigningInformation(staticOwner, flags, &information) == errSecSuccess,
               let details = information as? [String: Any],
-              let identity = details[kSecCodeInfoUnique as String] as? Data else { return false }
-        let hex = identity.map { String(format: "%02x", $0) }.joined()
-        guard matchesCode(as: getpid(), hash: hex) else { return false }
-        return matchesCode(as: pid, hash: hex)
+              let identity = details[kSecCodeInfoUnique as String] as? Data else { return nil }
+        return identity.map { String(format: "%02x", $0) }.joined()
     }
 
     private static func matchesCode(as pid: pid_t, hash: String) -> Bool {

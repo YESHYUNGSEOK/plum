@@ -633,6 +633,12 @@ public final class AppModel {
         tabs.values.joined().filter { !$0.session.isRemote }.count
     }
 
+    var hasTerminalsUpdateCannotRestore: Bool {
+        if !unrestoredTabs.isEmpty { return true }
+        if tabs.values.joined().contains(where: { !legacyTabIDs.contains($0.id) }) { return true }
+        return !(host?.list().isEmpty ?? true)
+    }
+
     public func activateTab(_ id: UUID) {
         guard let tab = tab(id) else { return }
         splitFocus[head(of: id)] = id

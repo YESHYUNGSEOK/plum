@@ -44,6 +44,32 @@ final class NavigationTests: XCTestCase {
         XCTAssertEqual(model.selection, order.last)
     }
 
+    func testUnrestoredTerminalBlocksUpdate() throws {
+        XCTAssertFalse(model.hasTerminalsUpdateCannotRestore)
+        var state = model.state
+        state.tabs = [SavedTab(id: UUID(), workspace: order[0], title: "running", active: true)]
+        try Store(directory: directory).save(state)
+
+        XCTAssertTrue(AppModel(store: Store(directory: directory)).hasTerminalsUpdateCannotRestore)
+    }
+
+    func testLocalTerminalBlocksUpdateUntilClosed() throws {
+        let folder = directory.appendingPathComponent("folder")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        var project = Project(name: "folder", path: folder.path)
+        project.folder = true
+        var state = AppState()
+        state.projects = [project]
+        try Store(directory: directory).save(state)
+        let local = AppModel(store: Store(directory: directory))
+        local.terminalHostExecutable = nil
+
+        let tab = try XCTUnwrap(local.openTab(in: project.id))
+        XCTAssertTrue(local.hasTerminalsUpdateCannotRestore)
+        local.closeTab(tab.id)
+        XCTAssertFalse(local.hasTerminalsUpdateCannotRestore)
+    }
+
     func testBackForwardAndLastPlace() {
         for index in 0...2 { model.selectWorkspace(at: index) }
         model.goBack()
