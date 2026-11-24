@@ -1,0 +1,35 @@
+Sources/PlumKit/Model/AppModel.swift
+  s_8fe9540016a213::t_078079bd106716 161-162
+Sources/PlumKit/Model/Models.swift
+  s_8fe9540016a213::t_42b8594de87e2c 237-244,250
+Tests/PlumKitTests/NavigationTests.swift
+  s_8fe9540016a213::t_8762839c2f63bb 171,263-264,266-267,313
+Tests/PlumKitTests/WorkspaceServiceTests.swift
+  s_89eee16ca7381c::t_1800899d96351a 435,438,443-458,490
+scripts/bundle.sh
+  s_8fe9540016a213::t_b1e6bcf2ead3c3 44-45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "021c3ff2e55a1af7313d9a65339ff15bfe3a8d53",
+  "prompts": {},
+  "sessions": {
+    "s_89eee16ca7381c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20b45-3c28-7831-9594-e2a4b17c2cbc",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    },
+    "s_8fe9540016a213": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e627-796a-77b1-9b41-dcebe0fc3aa2",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    }
+  }
+}
