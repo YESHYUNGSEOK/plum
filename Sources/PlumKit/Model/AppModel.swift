@@ -158,7 +158,8 @@ public final class AppModel {
 
     public init(store: Store = Store()) {
         self.store = store
-        state = store.load()
+        do { state = try store.load() }
+        catch { fatalError("Plum could not read state without risking data loss: \(error)") }
         unrestoredTabs = state.tabs
         carryOverAgentCommand()
     }

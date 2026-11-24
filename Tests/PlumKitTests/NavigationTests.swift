@@ -168,7 +168,7 @@ final class NavigationTests: XCTestCase {
         let model = AppModel(store: store)
         model.select(project.id)
         XCTAssertNotNil(model.activeTab)
-        XCTAssertEqual(store.load().tabs, [saved])
+        XCTAssertEqual(try store.load().tabs, [saved])
         model.activeTab?.session.terminate()
     }
 
@@ -260,11 +260,11 @@ final class NavigationTests: XCTestCase {
         let model = AppModel(store: store)
         model.restoreTabs(secureHost: secureClient, legacyHost: nil)
 
-        XCTAssertEqual(store.load().tabs, [saved, other])
-        XCTAssertEqual(store.load().splits[saved.id.uuidString], split)
+        XCTAssertEqual(try store.load().tabs, [saved, other])
+        XCTAssertEqual(try store.load().splits[saved.id.uuidString], split)
         let fresh = try XCTUnwrap(model.openTab(in: project.id))
-        XCTAssertEqual(Set(store.load().tabs.map(\.id)), Set([saved.id, other.id, fresh.id]))
-        XCTAssertEqual(store.load().splits[saved.id.uuidString], split)
+        XCTAssertEqual(Set(try store.load().tabs.map(\.id)), Set([saved.id, other.id, fresh.id]))
+        XCTAssertEqual(try store.load().splits[saved.id.uuidString], split)
     }
 
     func testUnknownWorkspaceDoesNotCloseARunningLegacySession() throws {
@@ -310,7 +310,7 @@ final class NavigationTests: XCTestCase {
         let model = AppModel(store: store)
         model.restoreTabs(secureHost: secureClient, legacyHost: legacyClient)
 
-        XCTAssertEqual(store.load().tabs, [saved])
+        XCTAssertEqual(try store.load().tabs, [saved])
     }
 
     func testSwitcherPutsRecentFirstAndRanksMatches() {
