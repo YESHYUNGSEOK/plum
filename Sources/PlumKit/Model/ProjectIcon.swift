@@ -83,7 +83,9 @@ enum ProjectIcon {
     /// A small regular file's bytes.
     private static func file(_ relative: String, in root: String) -> Data? {
         let url = URL(fileURLWithPath: root).appendingPathComponent(relative)
-        guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+        let realRoot = URL(fileURLWithPath: root).resolvingSymlinksInPath().path + "/"
+        guard url.resolvingSymlinksInPath().path.hasPrefix(realRoot),
+              let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
               values.isRegularFile == true, (values.fileSize ?? .max) <= maxBytes else { return nil }
         return try? Data(contentsOf: url)
     }

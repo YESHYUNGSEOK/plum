@@ -110,7 +110,13 @@ public final class AppModel {
     private static func keptLimits() -> [TabProgram: AgentReport] {
         guard let data = UserDefaults.standard.data(forKey: "planLimits"),
               let kept = try? JSONDecoder().decode([String: AgentReport].self, from: data) else { return [:] }
-        return Dictionary(uniqueKeysWithValues: kept.compactMap { key, value in TabProgram(rawValue: key).map { ($0, value) } })
+        return Dictionary(uniqueKeysWithValues: kept.compactMap { key, value in
+            guard let agent = TabProgram(rawValue: key) else { return nil }
+            var report = value
+            report.session = AgentReport.percent(report.session)
+            report.weekly = AgentReport.percent(report.weekly)
+            return (agent, report)
+        })
     }
     /// Tabs whose Claude reports through Plum's status line: their session files aren't read.
     @ObservationIgnored private var toldByStatusLine: Set<UUID> = []
@@ -188,6 +194,8 @@ public final class AppModel {
         }
         var plan = report
         (plan.model, plan.effort) = (nil, nil)
+        plan.session = AgentReport.percent(plan.session)
+        plan.weekly = AgentReport.percent(plan.weekly)
         if plan != AgentReport(), limits[agent] != plan { limits[agent] = plan }
     }
 
@@ -241,8 +249,9 @@ public final class AppModel {
             },
             onReport: { [weak self] tab, report in
                 MainActor.assumeIsolated {
-                    self?.toldByStatusLine.insert(tab)
-                    self?.take(report, from: .claude, tab: tab)
+                    guard let self, self.tab(tab) != nil else { return }
+                    self.toldByStatusLine.insert(tab)
+                    self.take(report, from: .claude, tab: tab)
                 }
             })
         do {
@@ -254,8 +263,9 @@ public final class AppModel {
         let secureHost = terminalHostExecutable.flatMap {
             TerminalHostClient(socketPath: TerminalHost.socketPath(for: store), executable: $0)
         }
+        // Keep the 11 terminals in this Mac's 11/22 host connected across the update.
         let oldHost = TerminalHostClient(legacySocketPath: TerminalHost.legacySocketPath(for: store),
-                                         codeHash: "b9b3230b9540d5f174d0e60c8729a53ba7cea9a9")
+                                         codeHash: "76807cd4262496e4e92b2edd312e6e6a7d3d601f", pid: 23399, pidVersion: 43136)
         restoreTabs(secureHost: secureHost, legacyHost: oldHost)
         if hasUnrestoredTabs, errorMessage == nil {
             errorMessage = String(localized: "기존 터미널에 연결하지 못했습니다. 저장된 탭 정보는 보존했습니다.")
@@ -690,6 +700,7 @@ public final class AppModel {
         tabs[tab.workspaceID] = list
         statuses[id] = nil
         models[id] = nil
+        toldByStatusLine.remove(id)
         if activeTabs[tab.workspaceID] == id {
             let bar = tabBarTabs(in: tab.workspaceID)
             activeTabs[tab.workspaceID] = sibling ?? (bar.isEmpty ? nil : bar[min(index, bar.count - 1)].id)

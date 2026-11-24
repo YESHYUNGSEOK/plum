@@ -3,6 +3,10 @@ import Foundation
 import GhosttyVt
 import Security
 
+@_silgen_name("csops_audittoken")
+private func csopsAuditToken(_ pid: pid_t, _ ops: UInt32, _ data: UnsafeMutableRawPointer,
+                             _ size: Int, _ token: UnsafeMutablePointer<audit_token_t>) -> Int32
+
 /// The process that keeps terminals alive while Plum isn't running.
 ///
 /// Plum starts it once (the same executable, `--terminal-host <socket>`).
@@ -23,7 +27,7 @@ import Security
 public final class TerminalHost {
     /// Bumped whenever the protocol or what the host does changes: a host
     /// started by an older Plum keeps its own socket and its own terminals.
-    public static let version = 3
+    public static let version = 4
 
     private let socketPath: String
     private let lock = NSLock()
@@ -210,12 +214,24 @@ public final class TerminalHost {
         connection.close()
     }
 
-    fileprivate static func isPlumProcess(_ fd: Int32, codeHash: String? = nil) -> Bool {
+    fileprivate static func isPlumProcess(_ fd: Int32, legacy: (hash: String, pid: pid_t, version: UInt32)? = nil) -> Bool {
+        if let legacy {
+            var token = audit_token_t()
+            var size = socklen_t(MemoryLayout<audit_token_t>.size)
+            guard getsockopt(fd, SOL_LOCAL, LOCAL_PEERTOKEN, &token, &size) == 0,
+                  size == MemoryLayout<audit_token_t>.size,
+                  pid_t(bitPattern: token.val.5) == legacy.pid,
+                  token.val.7 == legacy.version else { return false }
+            var hash = [UInt8](repeating: 0, count: 20)
+            let result = hash.withUnsafeMutableBytes {
+                csopsAuditToken(pid_t(bitPattern: token.val.5), 5, $0.baseAddress!, $0.count, &token)
+            }
+            return result == 0 && hash.map { String(format: "%02x", $0) }.joined() == legacy.hash
+        }
         var peer: pid_t = 0
         var size = socklen_t(MemoryLayout<pid_t>.size)
         guard getsockopt(fd, SOL_LOCAL, LOCAL_PEERPID, &peer, &size) == 0,
               size == MemoryLayout<pid_t>.size else { return false }
-        if let codeHash { return matchesCode(as: peer, hash: codeHash, allowReplacedDisk: true) }
         return sameCode(as: peer)
     }
 
@@ -234,7 +250,7 @@ public final class TerminalHost {
         return matchesCode(as: pid, hash: hex)
     }
 
-    private static func matchesCode(as pid: pid_t, hash: String, allowReplacedDisk: Bool = false) -> Bool {
+    private static func matchesCode(as pid: pid_t, hash: String) -> Bool {
         let flags = SecCSFlags(rawValue: 0)
         var requirement: SecRequirement?
         guard SecRequirementCreateWithString("cdhash H\"\(hash)\"" as CFString, flags, &requirement) == errSecSuccess,
@@ -243,17 +259,7 @@ public final class TerminalHost {
         var peer: SecCode?
         guard SecCodeCopyGuestWithAttributes(nil, attributes, flags, &peer) == errSecSuccess,
               let peer else { return false }
-        let validity = SecCodeCheckValidity(peer, flags, requirement)
-        if validity == errSecSuccess { return true }
-        // shortcut: the published 0.1.10 host can outlive a replaced bundle; remove after its sessions finish.
-        guard allowReplacedDisk, validity == errSecCSStaticCodeChanged else { return false }
-        var staticPeer: SecStaticCode?
-        var information: CFDictionary?
-        guard SecCodeCopyStaticCode(peer, flags, &staticPeer) == errSecSuccess, let staticPeer,
-              SecCodeCopySigningInformation(staticPeer, flags, &information) == errSecSuccess,
-              let details = information as? [String: Any],
-              let identity = details[kSecCodeInfoUnique as String] as? Data else { return false }
-        return identity.map { String(format: "%02x", $0) }.joined() == hash
+        return SecCodeCheckValidity(peer, flags, requirement) == errSecSuccess
     }
 
     private func session(_ id: String) -> HostSession? {
@@ -488,6 +494,8 @@ private final class HostSession {
         // As the app sets up its own (TerminalSession.configure).
         var scrollback = 10_000_000
         ghostty_terminal_set(terminal, GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES, &scrollback)
+        var kittyImageBytes: UInt64 = 0
+        ghostty_terminal_set(terminal, GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT, &kittyImageBytes)
         var graphemes = GhosttyTerminalModeConfig(mode: ghostty_mode_new(2027, false), value: true)
         ghostty_terminal_set(terminal, GHOSTTY_TERMINAL_OPT_MODE_DEFAULT, &graphemes)
         return terminal
@@ -627,7 +635,7 @@ public final class TerminalHostClient: @unchecked Sendable {
 
     private let socketPath: String
     private let expectedVersion: Int
-    private let trustedCodeHash: String?
+    private let trustedLegacy: (hash: String, pid: pid_t, version: UInt32)?
     /// One connection for requests; terminals get connections of their own.
     private var control: Connection?
     private var rejectedHost = false
@@ -638,7 +646,7 @@ public final class TerminalHostClient: @unchecked Sendable {
     public init?(socketPath: String, executable: String) {
         self.socketPath = socketPath
         expectedVersion = TerminalHost.version
-        trustedCodeHash = nil
+        trustedLegacy = nil
         if hello() { return }
         if rejectedHost { return nil }
         Self.launch(executable: executable, socketPath: socketPath)
@@ -651,10 +659,10 @@ public final class TerminalHostClient: @unchecked Sendable {
     }
 
     /// Only reconnects to the known legacy host; never launches one.
-    public init?(legacySocketPath: String, codeHash: String) {
+    public init?(legacySocketPath: String, codeHash: String, pid: pid_t, pidVersion: UInt32) {
         socketPath = legacySocketPath
         expectedVersion = 1
-        trustedCodeHash = codeHash
+        trustedLegacy = (codeHash, pid, pidVersion)
         guard hello() else { return nil }
     }
 
@@ -710,7 +718,7 @@ public final class TerminalHostClient: @unchecked Sendable {
                   error == 0 else { Darwin.close(fd); return nil }
         }
         guard fcntl(fd, F_SETFL, originalFlags) >= 0 else { Darwin.close(fd); return nil }
-        guard TerminalHost.isPlumProcess(fd, codeHash: trustedCodeHash) else {
+        guard TerminalHost.isPlumProcess(fd, legacy: trustedLegacy) else {
             rejectedHost = true
             Darwin.close(fd)
             return nil

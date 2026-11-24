@@ -211,6 +211,8 @@ public final class TerminalSession {
         // Ghostty's own default; the library default keeps only about one page.
         var scrollback = 10_000_000
         set(GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES, &scrollback)
+        var kittyImageBytes: UInt64 = 0
+        set(GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT, &kittyImageBytes)
 
         "xterm-256color".withGhosttyString { set(GHOSTTY_TERMINAL_OPT_TERMINFO_NAME, $0) }
 

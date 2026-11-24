@@ -1,7 +1,15 @@
+import GhosttyVt
 import XCTest
 @testable import PlumKit
 
 final class TerminalSessionTests: XCTestCase {
+    func testUnusedKittyGraphicsProtocolIsDisabled() {
+        let session = TerminalSession(cols: 40, rows: 5)
+        var bytes: UInt64 = .max
+        XCTAssertEqual(ghostty_terminal_get(session.terminal, GHOSTTY_TERMINAL_DATA_KITTY_IMAGE_STORAGE_LIMIT, &bytes), GHOSTTY_SUCCESS)
+        XCTAssertEqual(bytes, 0)
+    }
+
     func testFeedAndReadBack() {
         let session = TerminalSession(cols: 40, rows: 5)
         session.feed("Hello \u{1b}[1;32m한글\u{1b}[0m world\r\nsecond")

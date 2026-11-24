@@ -13,7 +13,7 @@ public enum WorkspaceService {
     /// What would be lost by removing a workspace.
     public struct RemovalCheck: Equatable {
         public var folderMissing = false
-        /// `git status --porcelain` lines: modified, staged and untracked files.
+        /// `git status --porcelain` lines: modified, staged, untracked and ignored files.
         public var uncommitted: [String] = []
         /// Commits that are on no remote. Only filled when the branch would be deleted.
         public var unpushed: [String] = []
@@ -124,8 +124,11 @@ public enum WorkspaceService {
             guard nested == approvedNested else {
                 throw GitError(message: String(localized: "안쪽 워크트리 목록이 바뀌었습니다. 다시 확인한 뒤 삭제하세요."))
             }
+            for inner in nested where !(try Git.uncommittedChanges(in: inner.path)).isEmpty {
+                throw GitError(message: String(localized: "안쪽 워크트리에 저장되지 않은 변경이 있습니다. 확인 후 다시 시도하세요: \(inner.path)"))
+            }
             for inner in nested {
-                try Git.removeWorktree(repository: project.path, path: inner.path, force: true)
+                try Git.removeWorktree(repository: project.path, path: inner.path, force: false)
                 if let branch = inner.branch, let left = Git.deleteBranchIfMerged(branch, in: project.path) { kept.append(left) }
             }
             try removeWorktree(workspace, project: project, force: force)
@@ -135,8 +138,11 @@ public enum WorkspaceService {
     }
 
     /// Removes the worktree folder and git's record of it. Without `force`,
-    /// git refuses when the worktree has uncommitted work.
+    /// uncommitted or ignored files are kept until their loss is confirmed.
     public static func removeWorktree(_ workspace: Workspace, project: Project, force: Bool) throws {
+        guard nestedWorktrees(workspace, project: project).isEmpty else {
+            throw GitError(message: String(localized: "안쪽 워크트리가 있어 아카이브할 수 없습니다. 안쪽 워크트리를 먼저 정리하세요."))
+        }
         let registered = Git.worktrees(in: project.path)
         guard let index = registered.firstIndex(where: { samePath($0.path, workspace.path) }) else {
             // git doesn't know this path. If the folder is gone too there is
@@ -148,6 +154,9 @@ public enum WorkspaceService {
         }
         guard index != 0, !samePath(workspace.path, project.path) else {
             throw GitError(message: String(localized: "프로젝트의 기본 체크아웃은 지울 수 없습니다."))
+        }
+        if !force, FileManager.default.fileExists(atPath: workspace.path), !(try Git.uncommittedChanges(in: workspace.path)).isEmpty {
+            throw GitError(message: String(localized: "워크트리에 저장되지 않은 파일이 있습니다. 확인 후 다시 시도하세요."))
         }
         try Git.removeWorktree(repository: project.path, path: workspace.path, force: force)
     }

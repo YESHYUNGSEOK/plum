@@ -64,6 +64,16 @@ final class ProjectIconTests: XCTestCase {
         XCTAssertNil(ProjectIcon.find(in: root.path))
     }
 
+    func testSymlinkedIconDirectoryOutsideRepositoryIsSkipped() throws {
+        let outside = root.deletingLastPathComponent().appendingPathComponent("plum-private-icons-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: outside) }
+        try png().write(to: outside.appendingPathComponent("favicon.png"))
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("public"), withDestinationURL: outside)
+
+        XCTAssertNil(ProjectIcon.find(in: root.path))
+    }
+
     private func write(_ path: String, _ data: Data) throws {
         let url = root.appendingPathComponent(path)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)

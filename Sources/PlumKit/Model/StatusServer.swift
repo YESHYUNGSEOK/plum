@@ -55,13 +55,18 @@ public struct AgentReport: Equatable, Sendable, Codable {
     public var sessionResets: Date?
     public var weeklyResets: Date?
 
+    static func percent(_ value: Double?) -> Double? {
+        guard let value, value.isFinite, (0...100).contains(value) else { return nil }
+        return value
+    }
+
     /// "<tab> statusline <json>": Claude Code's status line input, passed on by Plum's status line command.
     public static func parse(_ line: String) -> (tab: UUID, report: AgentReport)? {
         let parts = line.split(separator: " ", maxSplits: 2).map(String.init)
         guard parts.count == 3, parts[1] == "statusline", let tab = UUID(uuidString: parts[0]),
               let input = try? JSONSerialization.jsonObject(with: Data(parts[2].utf8)) as? [String: Any] else { return nil }
         let limits = input["rate_limits"] as? [String: Any]
-        func used(_ window: String) -> Double? { ((limits?[window] as? [String: Any])?["used_percentage"] as? NSNumber)?.doubleValue }
+        func used(_ window: String) -> Double? { percent(((limits?[window] as? [String: Any])?["used_percentage"] as? NSNumber)?.doubleValue) }
         func resets(_ window: String) -> Date? { date((limits?[window] as? [String: Any])?["resets_at"]) }
         let model = ((input["model"] as? [String: Any])?["display_name"] as? String).map { sanitizeForDisplay($0, limit: 40) }
         let effort = ((input["effort"] as? [String: Any])?["level"] as? String).map { sanitizeForDisplay($0, limit: 12) }
@@ -93,9 +98,9 @@ public struct AgentReport: Equatable, Sendable, Codable {
                   let minutes = (window["window_minutes"] as? NSNumber)?.intValue else { continue }
             // Codex names its windows by length: hours for the session one, a week for the other.
             if minutes < 1440 {
-                (report.session, report.sessionResets) = (used, date(window["resets_at"]))
+                (report.session, report.sessionResets) = (percent(used), date(window["resets_at"]))
             } else {
-                (report.weekly, report.weeklyResets) = (used, date(window["resets_at"]))
+                (report.weekly, report.weeklyResets) = (percent(used), date(window["resets_at"]))
             }
         }
         return report
@@ -205,7 +210,7 @@ public enum ClaudeUsage {
             let resets = (window?["resets_at"] as? String).flatMap {
                 ISO8601DateFormatter().date(from: $0.replacingOccurrences(of: #"\.\d+"#, with: "", options: .regularExpression))
             }
-            return ((window?["utilization"] as? NSNumber)?.doubleValue, resets)
+            return (AgentReport.percent((window?["utilization"] as? NSNumber)?.doubleValue), resets)
         }
         let (session, weekly) = (window("five_hour"), window("seven_day"))
         return AgentReport(session: session.0, weekly: weekly.0, sessionResets: session.1, weeklyResets: weekly.1)

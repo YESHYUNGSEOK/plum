@@ -19,6 +19,18 @@ final class AgentReportTests: XCTestCase {
         XCTAssertNil(StatusMessage.parse("\(tab.uuidString) statusline \(json)"), "nor a report a state line")
     }
 
+    func testInvalidUsagePercentagesAreIgnored() throws {
+        let tab = UUID()
+        let json = #"{"rate_limits":{"five_hour":{"used_percentage":1e100},"seven_day":{"used_percentage":-1}}}"#
+        let said = try XCTUnwrap(AgentReport.parse("\(tab.uuidString) statusline \(json)"))
+        XCTAssertNil(said.report.session)
+        XCTAssertNil(said.report.weekly)
+
+        let codex = Data(#"{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":1e100,"window_minutes":300}}}}"#.utf8)
+        XCTAssertNil(AgentReport.codex(session: codex).session)
+        XCTAssertNil(ClaudeUsage.parse(Data(#"{"five_hour":{"utilization":1e100}}"#.utf8))?.session)
+    }
+
     func testCodexSessionFileFoundByFolder() throws {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent("plum-codex-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: home) }

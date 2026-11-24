@@ -315,7 +315,7 @@ final class TerminalHostTests: XCTestCase {
 
     func testLegacyClientDoesNotStartAMissingHost() {
         let missing = NSTemporaryDirectory() + "plum-missing-legacy-\(UUID().uuidString).sock"
-        XCTAssertNil(TerminalHostClient(legacySocketPath: missing, codeHash: "b9b3230b9540d5f174d0e60c8729a53ba7cea9a9"))
+        XCTAssertNil(TerminalHostClient(legacySocketPath: missing, codeHash: "76807cd4262496e4e92b2edd312e6e6a7d3d601f", pid: 23399, pidVersion: 43136))
         XCTAssertFalse(FileManager.default.fileExists(atPath: missing))
     }
 
@@ -328,7 +328,7 @@ final class TerminalHostTests: XCTestCase {
         defer { fake.terminate(); fake.waitUntilExit(); unlink(fakeSocket) }
         wait("fake legacy socket is ready") { FileManager.default.fileExists(atPath: fakeSocket) }
 
-        XCTAssertNil(TerminalHostClient(legacySocketPath: fakeSocket, codeHash: "b9b3230b9540d5f174d0e60c8729a53ba7cea9a9"))
+        XCTAssertNil(TerminalHostClient(legacySocketPath: fakeSocket, codeHash: "76807cd4262496e4e92b2edd312e6e6a7d3d601f", pid: 23399, pidVersion: 43136))
     }
 
     func testRunningLegacyHostCanBeListedAfterItsBinaryWasReplacedOnDisk() throws {
@@ -337,14 +337,14 @@ final class TerminalHostTests: XCTestCase {
             throw XCTSkip("requires an isolated or live legacy host")
         }
         let legacy = try XCTUnwrap(TerminalHostClient(legacySocketPath: socket,
-                                                      codeHash: "b9b3230b9540d5f174d0e60c8729a53ba7cea9a9"))
+                                                      codeHash: "76807cd4262496e4e92b2edd312e6e6a7d3d601f", pid: 23399, pidVersion: 43136))
         XCTAssertFalse(legacy.list().isEmpty)
     }
 
     func testHardenedHostUsesADifferentSocketFromLegacyHost() {
         let store = Store(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
         XCTAssertTrue(TerminalHost.legacySocketPath(for: store).contains("plum-host-1-"))
-        XCTAssertTrue(TerminalHost.socketPath(for: store).contains("plum-host-3-"))
+        XCTAssertTrue(TerminalHost.socketPath(for: store).contains("plum-host-4-"))
         XCTAssertNotEqual(TerminalHost.legacySocketPath(for: store), TerminalHost.socketPath(for: store))
     }
 

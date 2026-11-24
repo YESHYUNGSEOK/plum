@@ -507,7 +507,7 @@ private struct UsageBar: View {
                 .overlay(alignment: .leading) {
                     Capsule().fill(Theme.secondary).frame(width: 36 * min(max(used, 0), 100) / 100)
                 }
-            Text(verbatim: "\(Int(used.rounded()))%")
+            Text(verbatim: "\(Int(used.isFinite ? min(max(used, 0), 100).rounded() : 0))%")
         }
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
