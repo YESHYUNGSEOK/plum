@@ -81,6 +81,56 @@ final class StatusServerSecurityTests: XCTestCase {
         XCTAssertEqual(read(client, &response, 1), 0)
     }
 
+    func testSlowClientCannotHoldUpFollowingStatus() throws {
+        let tab = UUID()
+        let heard = expectation(description: "following status")
+        let server = StatusServer(directory: directory, onMessage: { id, status, _ in
+            if id == tab, status == .waiting { heard.fulfill() }
+        })
+        try server.start()
+        defer { server.stop() }
+
+        func client() throws -> Int32 {
+            let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+            guard fd >= 0 else { throw POSIXError(.EIO) }
+            var noSigPipe: Int32 = 1
+            setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
+            var address = sockaddr_un()
+            address.sun_family = sa_family_t(AF_UNIX)
+            let capacity = MemoryLayout.size(ofValue: address.sun_path)
+            withUnsafeMutablePointer(to: &address.sun_path) { pointer in
+                pointer.withMemoryRebound(to: CChar.self, capacity: capacity) {
+                    _ = strlcpy($0, server.path, capacity)
+                }
+            }
+            let connected = withUnsafePointer(to: &address) { pointer in
+                pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+                }
+            }
+            guard connected == 0 else { close(fd); throw POSIXError(.ECONNREFUSED) }
+            return fd
+        }
+
+        let slow = try client()
+        let dripper = DispatchGroup()
+        dripper.enter()
+        defer { dripper.wait(); close(slow) }
+        DispatchQueue.global().async {
+            defer { dripper.leave() }
+            for _ in 0..<15 {
+                let byte: UInt8 = 0x61
+                guard withUnsafePointer(to: byte, { write(slow, $0, 1) }) == 1 else { break }
+                usleep(200_000)
+            }
+        }
+        let following = try client()
+        defer { close(following) }
+        let line = "\(tab.uuidString) waiting hello\n"
+        XCTAssertEqual(line.withCString { write(following, $0, strlen($0)) }, line.utf8.count)
+        wait(for: [heard], timeout: 2)
+    }
+
     private func inode(at path: String) throws -> UInt64 {
         var details = stat()
         guard lstat(path, &details) == 0 else { throw POSIXError(.init(rawValue: errno) ?? .EIO) }

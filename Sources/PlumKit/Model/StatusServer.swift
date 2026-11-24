@@ -346,7 +346,8 @@ public enum CodexHooks {
         // No Codex folder, no Codex to tell.
         guard manager.fileExists(atPath: (file as NSString).deletingLastPathComponent) else { return .missingConfig }
         var root: [String: Any] = [:]
-        if let data = manager.contents(atPath: file) {
+        let original = manager.contents(atPath: file)
+        if let data = original {
             guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return .unreadable }
             root = json
         } else if manager.fileExists(atPath: file) {
@@ -379,6 +380,7 @@ public enum CodexHooks {
         let temporary = file + ".plum-\(UUID().uuidString).tmp"
         let mode = (try? manager.attributesOfItem(atPath: file)[.posixPermissions] as? Int) ?? 0o600
         guard manager.createFile(atPath: temporary, contents: data, attributes: [.posixPermissions: mode]) else { return .unreadable }
+        guard manager.contents(atPath: file) == original else { unlink(temporary); return .locked }
         guard rename(temporary, file) == 0 else {
             unlink(temporary)
             return .unreadable
@@ -533,8 +535,13 @@ public final class StatusServer {
 
         var data = Data()
         var buffer = [UInt8](repeating: 0, count: 4096)
+        let deadline = DispatchTime.now().uptimeNanoseconds + 1_000_000_000
         // A Stop hook's line carries Claude's last answer: allow for a long one.
         while data.count < 1 << 20, !data.contains(0x0A) {
+            let now = DispatchTime.now().uptimeNanoseconds
+            guard now < deadline else { break }
+            var ready = pollfd(fd: client, events: Int16(POLLIN), revents: 0)
+            guard poll(&ready, 1, Int32((deadline - now) / 1_000_000)) > 0 else { break }
             let n = read(client, &buffer, buffer.count)
             guard n > 0 else { break }
             data.append(buffer, count: n)

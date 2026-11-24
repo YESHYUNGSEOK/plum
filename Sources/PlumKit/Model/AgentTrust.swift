@@ -39,7 +39,8 @@ public enum ClaudeTrust {
         guard locked else { return .locked }
         defer { rmdir(lock) }
 
-        guard var json = read(file) else { return .unreadable }
+        guard let original = FileManager.default.contents(atPath: file),
+              var json = try? JSONSerialization.jsonObject(with: original) as? [String: Any] else { return .unreadable }
         if trusted(json, keys) { return .unchanged }
         guard json["projects"] == nil || json["projects"] is [String: Any] else { return .unreadable }
         var projects = json["projects"] as? [String: Any] ?? [:]
@@ -59,6 +60,7 @@ public enum ClaudeTrust {
         guard FileManager.default.createFile(atPath: temporary, contents: data, attributes: [.posixPermissions: mode]) else {
             return .unreadable
         }
+        guard FileManager.default.contents(atPath: file) == original else { unlink(temporary); return .locked }
         guard rename(temporary, file) == 0 else {
             unlink(temporary)
             return .unreadable
@@ -121,6 +123,7 @@ public enum CodexTrust {
         guard FileManager.default.createFile(atPath: temporary, contents: Data(text.utf8), attributes: [.posixPermissions: mode]) else {
             return .unreadable
         }
+        guard FileManager.default.contents(atPath: file) == data else { unlink(temporary); return .locked }
         guard rename(temporary, file) == 0 else {
             unlink(temporary)
             return .unreadable
