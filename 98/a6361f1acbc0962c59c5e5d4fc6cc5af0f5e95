@@ -1,0 +1,19 @@
+scripts/bundle.sh
+  s_bf0ed424735551::t_7e6c941b6826cd 44-45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "98a6361f1acbc0962c59c5e5d4fc6cc5af0f5e95",
+  "prompts": {},
+  "sessions": {
+    "s_bf0ed424735551": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5ac29605-eee3-4cf1-9703-b5fa4086d055",
+        "model": "claude-fable-5-2"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    }
+  }
+}
