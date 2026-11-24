@@ -159,14 +159,12 @@ enum AppActions {
     }
 
     /// Shows the question in the window and waits for the answer.
-    /// Asks GitHub for a newer release and offers it. `quietly` (the daily
-    /// check) says nothing unless there is one, and then only in a toast.
+    /// Asks GitHub for a newer release; one is offered in a toast, whose
+    /// "Install" installs it. `quietly` (the daily check) says nothing else.
     static func checkForUpdates(_ model: AppModel, quietly: Bool) async {
         do {
             if let release = try await Updates.newer() {
-                // The daily check only says so, in a toast; the menu asks now.
-                if quietly { return model.availableUpdate = release }
-                await offerUpdate(model, release)
+                model.availableUpdate = release
             } else if !quietly {
                 model.notice = String(localized: "최신 버전입니다 (\(Updates.current)).")
             }
@@ -175,20 +173,13 @@ enum AppActions {
         }
     }
 
-    /// Asks to install a newer release, then installs it and restarts.
-    static func offerUpdate(_ model: AppModel, _ release: Updates.Release) async {
-        // Don't interrupt a dialog that is already open.
-        guard model.sheet == nil else { return }
+    /// Downloads and installs a newer release, then restarts: the toast's
+    /// "Install". Terminals and their programs carry on in the host.
+    static func installUpdate(_ model: AppModel, _ release: Updates.Release) async {
         model.availableUpdate = nil
         if let reason = Updates.cannotInstall(release) {
-            return await offerPage(model, release, title: String(localized: "새 버전이 있습니다: \(release.tag)"),
-                                   summary: String(localized: "지금 버전은 \(Updates.current)입니다. 여기서는 바로 설치할 수 없습니다: \(reason)"))
+            return model.errorMessage = String(localized: "업데이트를 설치하지 못했습니다: \(reason)")
         }
-        guard await ask(model, Confirmation(
-            title: String(localized: "새 버전이 있습니다: \(release.tag)"),
-            summary: String(localized: "지금 버전은 \(Updates.current)입니다. 내려받아 설치하고 Plum을 다시 시작할까요? 터미널과 그 안의 프로그램은 그대로 이어집니다."),
-            sections: [], action: String(localized: "설치하고 다시 시작"), destructive: false)) else { return }
-        // The toast and the menu can both get here.
         guard !installing else { return }
         installing = true
         defer { installing = false }
@@ -200,8 +191,7 @@ enum AppActions {
             relaunch(app)
         } catch {
             model.notice = nil
-            await offerPage(model, release, title: String(localized: "업데이트를 설치하지 못했습니다"),
-                            summary: error.localizedDescription)
+            model.errorMessage = String(localized: "업데이트를 설치하지 못했습니다: \(error.localizedDescription)")
         }
     }
 
@@ -249,13 +239,6 @@ enum AppActions {
             message += String(localized: " 브랜치가 없는 워크트리 \(catalog.detached)개와 폴더가 없는 워크트리 \(catalog.missing)개는 건너뛰었습니다.")
         }
         model.notice = message
-    }
-
-    private static func offerPage(_ model: AppModel, _ release: Updates.Release, title: String, summary: String) async {
-        let open = await ask(model, Confirmation(
-            title: title, summary: summary + " " + String(localized: "내려받기 페이지를 열까요?"),
-            sections: [], action: String(localized: "페이지 열기"), destructive: false))
-        if open { NSWorkspace.shared.open(release.page) }
     }
 
     private static var installing = false

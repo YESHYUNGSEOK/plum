@@ -145,8 +145,13 @@ extension AppModel {
         case "notice": // shows a notice toast (not an error); empty clears it
             notice = argument.isEmpty ? nil : argument
             return "ok"
-        case "update-available": // tag: as if the daily check had found that release (no assets); empty clears it
-            let release = try? JSONSerialization.data(withJSONObject: ["tag_name": argument, "html_url": "https://github.com/YESHYUNGSEOK/plum/releases"])
+        case "update-available": // tag: as if the daily check had found that release on GitHub; empty clears it
+            let base = "https://github.com/YESHYUNGSEOK/plum/releases/download/\(argument)/Plum-\(argument.drop { !$0.isNumber })-\(Updates.architecture).zip"
+            let release = try? JSONSerialization.data(withJSONObject: [
+                "tag_name": argument, "html_url": "https://github.com/YESHYUNGSEOK/plum/releases",
+                "assets": [["name": (base as NSString).lastPathComponent, "browser_download_url": base],
+                           ["name": (base as NSString).lastPathComponent + ".sig", "browser_download_url": base + ".sig"]],
+            ])
             availableUpdate = argument.isEmpty ? nil : release.flatMap { try? JSONDecoder().decode(Updates.Release.self, from: $0) }
             return "ok"
         case "import-orca": // imports from Orca without asking (its CLI, read-only); the outcome lands in "result"

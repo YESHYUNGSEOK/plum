@@ -764,7 +764,7 @@ final class TerminalAreaController: NSViewController {
             let install = update.map { release in
                 (title: LocalizedStringKey("설치"), run: { [weak model] in
                     guard let model else { return }
-                    Task { await AppActions.offerUpdate(model, release) }
+                    Task { await AppActions.installUpdate(model, release) }
                 })
             }
             toast.rootView = ToastView(message: message, isError: error != nil, action: install) { [weak model] in

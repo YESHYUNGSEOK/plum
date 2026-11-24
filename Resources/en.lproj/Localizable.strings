@@ -268,7 +268,6 @@
 "파랑" = "Blue";
 "파일" = "File";
 "파일 복사" = "Copy files";
-"페이지 열기" = "Open Page";
 "편집" = "Edit";
 "펼치기" = "Expand";
 "폴더 없음" = "Folder missing";
@@ -296,18 +295,14 @@
 "PR #%lld이 닫혔습니다." = "PR #%lld was closed.";
 "PR #%lld의 체크를 모두 통과했습니다." = "PR #%lld passed all its checks.";
 "PR #%lld의 체크가 실패했습니다." = "PR #%lld failed a check.";
-"설치하고 다시 시작" = "Install and Restart";
 "설치" = "Install";
 "업데이트를 내려받는 중…" = "Downloading the update…";
-"업데이트를 설치하지 못했습니다" = "Couldn't Install the Update";
+"업데이트를 설치하지 못했습니다: %@" = "Couldn't install the update: %@";
 "내려받은 파일의 서명이 맞지 않아 설치하지 않았습니다." = "The download's signature doesn't match, so it wasn't installed.";
 "내려받은 파일이 이 버전의 Plum이 아닙니다." = "The download isn't this version of Plum.";
 "내려받은 파일을 풀지 못했습니다." = "Couldn't unpack the download.";
 "이 릴리스에는 이 Mac용 서명된 파일이 없습니다." = "This release has no signed download for this Mac.";
 "앱을 바꾸지 못했습니다: %@" = "Couldn't replace the app: %@";
-"내려받기 페이지를 열까요?" = "Open the download page?";
-"지금 버전은 %@입니다. 여기서는 바로 설치할 수 없습니다: %@" = "This is version %@. It can't install itself here: %@";
-"지금 버전은 %@입니다. 내려받아 설치하고 Plum을 다시 시작할까요? 터미널과 그 안의 프로그램은 그대로 이어집니다." = "This is version %@. Download and install it, and restart Plum? Terminals and the programs in them carry on.";
 "업데이트를 설치했습니다. Plum을 다시 시작하면 적용됩니다." = "The update is installed. It takes effect when Plum restarts.";
 "%@ 폴더를 바꿀 권한이 없습니다." = "No permission to change the folder %@.";
 "Plum이 macOS가 정한 임시 위치에서 실행 중입니다. 응용 프로그램 폴더로 옮긴 뒤 다시 여세요." = "Plum is running from a temporary place macOS chose. Move it to Applications and open it again.";
