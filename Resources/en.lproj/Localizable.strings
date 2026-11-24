@@ -344,3 +344,6 @@
 "%@ 초기화 (%@)" = "Resets %@ (%@)";
 "주간" = "week";
 "오류로 멈췄습니다." = "Stopped by an error.";
+"함께 삭제되는 무시 파일" = "Ignored files deleted with it";
+"다시 만들 수 있는 것 %lld개" = "%lld that an install or build makes again";
+"무시 파일을 지우고 아카이브" = "Delete Ignored Files and Archive";

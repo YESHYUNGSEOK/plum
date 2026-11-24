@@ -47,6 +47,9 @@ public final class Confirmation {
         let lines: [String]
         /// Longest leading word shown apart as a code (a git status, a hash); 0 = none.
         var maxCode = 0
+        /// More lines, shown as a count until asked for: what matters less.
+        var folded: [String] = []
+        var foldedTitle = ""
     }
 
     let id = UUID()
@@ -944,17 +947,18 @@ private struct LineList: View {
     private var title: String { section.title }
     private var lines: [String] { section.lines }
     private var maxCode: Int { section.maxCode }
+    @State private var unfolded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Text(title).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(Theme.text)
-                Text("\(lines.count)")
+                Text("\(lines.count + section.folded.count)")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(Theme.panelColor)
                     .padding(.horizontal, 6)
                     .frame(height: 16)
-                    .background(Capsule().fill(Theme.waiting))
+                    .background(Capsule().fill(lines.isEmpty ? Theme.secondary : Theme.waiting))
             }
             .accessibilityElement(children: .combine)
             VStack(alignment: .leading, spacing: 3) {
@@ -971,6 +975,25 @@ private struct LineList: View {
                 }
                 if lines.count > 12 {
                     Text("… 외 \(lines.count - 12)개").foregroundStyle(Theme.tertiary)
+                }
+                if !section.folded.isEmpty {
+                    Button { unfolded.toggle() } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: unfolded ? "chevron.down" : "chevron.right").font(.system(size: 8, weight: .bold))
+                            Text(verbatim: section.foldedTitle)
+                        }
+                        .foregroundStyle(Theme.secondary)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    if unfolded {
+                        ForEach(Array(section.folded.prefix(12).enumerated()), id: \.offset) { _, line in
+                            Text(line).foregroundStyle(Theme.tertiary).lineLimit(1).truncationMode(.middle).padding(.leading, 14)
+                        }
+                        if section.folded.count > 12 {
+                            Text("… 외 \(section.folded.count - 12)개").foregroundStyle(Theme.tertiary).padding(.leading, 14)
+                        }
+                    }
                 }
             }
             .font(.system(size: 12, design: .monospaced))

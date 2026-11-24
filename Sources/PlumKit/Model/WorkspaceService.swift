@@ -22,6 +22,33 @@ public enum WorkspaceService {
         var fileSnapshot: [String]?
 
         public var isClean: Bool { uncommitted.isEmpty && unpushed.isEmpty }
+
+        /// The `uncommitted` lines that are work: changes to tracked files and new
+        /// files (and a line saying the state couldn't be read: unknown is not clean).
+        public var changes: [String] { uncommitted.filter { !$0.hasPrefix("!! ") } }
+
+        /// The ignored files and folders among them (paths), apart: ones an
+        /// install or a build makes again, and the rest, which may be gone for
+        /// good with the folder (`.env.local`).
+        public var ignored: (kept: [String], rebuildable: [String]) {
+            let paths = uncommitted.filter { $0.hasPrefix("!! ") }.map { String($0.dropFirst(3)) }
+            return (paths.filter { !Self.isRebuildable($0) }, paths.filter(Self.isRebuildable))
+        }
+
+        /// Something would be lost that nothing makes again.
+        public var hasLosses: Bool { !changes.isEmpty || !ignored.kept.isEmpty || !unpushed.isEmpty }
+
+        /// By name alone: a folder tools fill (`node_modules`, `.next`, `dist`,
+        /// `build`, generated code) anywhere in the path, or a file they write.
+        /// ponytail: a fixed list of names; a project that keeps work in a
+        /// folder called `build` has it folded away with the rest.
+        static func isRebuildable(_ path: String) -> Bool {
+            let parts = path.trimmingCharacters(in: CharacterSet(charactersIn: "\"")).split(separator: "/").map(String.init)
+            let folders: Set = ["node_modules", ".next", ".nuxt", "dist", "build", ".build", "target", ".turbo", ".cache", ".parcel-cache",
+                                "coverage", "__pycache__", ".pytest_cache", ".venv", "venv", ".gradle", "DerivedData", "Pods", ".swiftpm", "generated"]
+            guard let name = parts.last else { return false }
+            return parts.contains(where: folders.contains) || name.hasSuffix(".tsbuildinfo") || name == "next-env.d.ts" || name == ".DS_Store"
+        }
     }
 
     public struct Created {

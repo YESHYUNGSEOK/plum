@@ -72,18 +72,26 @@ enum AppActions {
             let check = await model.removalCheck(workspace.id, deletingBranch: false)
             let openTabs = model.tabs[workspace.id]?.count ?? 0
             if !check.isClean || openTabs > 0 {
-                guard await ask(model, Confirmation(
-                    title: String(localized: "‘\(workspace.name)’을 아카이브할까요?"),
-                    summary: String(localized: "워크트리 폴더를 지우고 브랜치 \(workspace.branch)는 남깁니다. 나중에 복원할 수 있습니다."),
-                    sections: losses(check) + running(model, workspace.id), note: terminalsNote(openTabs),
-                    action: check.uncommitted.isEmpty ? String(localized: "아카이브") : String(localized: "변경을 버리고 아카이브"),
-                    destructive: !check.uncommitted.isEmpty))
+                guard await ask(model, archiveQuestion(workspace, check, more: running(model, workspace.id), note: terminalsNote(openTabs)))
                 else { return }
             }
             await run(model) {
                 try await model.archive(workspace.id, force: !check.uncommitted.isEmpty, approved: check)
             }
         }
+    }
+
+    /// Asked before archiving. "Discard changes" only when there are changes;
+    /// ignored files nothing makes again are named apart; with neither, plain "Archive".
+    static func archiveQuestion(_ workspace: Workspace, _ check: WorkspaceService.RemovalCheck,
+                                more: [Confirmation.Section] = [], note: String? = nil) -> Confirmation {
+        let action = !check.changes.isEmpty ? String(localized: "변경을 버리고 아카이브")
+            : !check.ignored.kept.isEmpty ? String(localized: "무시 파일을 지우고 아카이브") : String(localized: "아카이브")
+        return Confirmation(
+            title: String(localized: "‘\(workspace.name)’을 아카이브할까요?"),
+            summary: String(localized: "워크트리 폴더를 지우고 브랜치 \(workspace.branch)는 남깁니다. 나중에 복원할 수 있습니다."),
+            sections: losses(check) + more, note: note, action: action,
+            destructive: !check.changes.isEmpty || !check.ignored.kept.isEmpty)
     }
 
     static func delete(_ model: AppModel, _ workspace: Workspace) {
@@ -102,7 +110,7 @@ enum AppActions {
             guard await ask(model, Confirmation(
                 title: String(localized: "‘\(workspace.name)’을 삭제할까요?"), summary: summary,
                 sections: losses(check) + nested + running(model, workspace.id), note: terminalsNote(openTabs),
-                action: check.isClean ? String(localized: "삭제") : String(localized: "잃어도 좋으니 삭제"), destructive: true))
+                action: check.hasLosses ? String(localized: "잃어도 좋으니 삭제") : String(localized: "삭제"), destructive: true))
             else { return }
             var kept: [Git.Branch] = []
             await run(model) {
@@ -146,9 +154,16 @@ enum AppActions {
     }
 
     /// Exactly what would be lost, so "confirm" is an informed choice.
-    private static func losses(_ check: WorkspaceService.RemovalCheck) -> [Confirmation.Section] {
+    /// Work (changed and new files) apart from ignored files, and among those
+    /// the ones an install or a build makes again folded to a count.
+    static func losses(_ check: WorkspaceService.RemovalCheck) -> [Confirmation.Section] {
         var sections: [Confirmation.Section] = []
-        if !check.uncommitted.isEmpty { sections.append(.init(title: String(localized: "커밋하지 않은 변경"), lines: check.uncommitted, maxCode: 2)) }
+        if !check.changes.isEmpty { sections.append(.init(title: String(localized: "커밋하지 않은 변경"), lines: check.changes, maxCode: 2)) }
+        let ignored = check.ignored
+        if !ignored.kept.isEmpty || !ignored.rebuildable.isEmpty {
+            sections.append(.init(title: String(localized: "함께 삭제되는 무시 파일"), lines: ignored.kept, folded: ignored.rebuildable,
+                                  foldedTitle: String(localized: "다시 만들 수 있는 것 \(ignored.rebuildable.count)개")))
+        }
         if !check.unpushed.isEmpty { sections.append(.init(title: String(localized: "원격에 없는 커밋"), lines: check.unpushed, maxCode: 40)) }
         return sections
     }
