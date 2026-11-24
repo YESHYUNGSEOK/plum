@@ -1,0 +1,19 @@
+Tests/PlumKitTests/ProjectIconTests.swift
+  s_32b60adb8e42c1::t_fc3bf7f134723e 58-65,91-92
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f3f57da891fef86c266269a562bdf6eead13f697",
+  "prompts": {},
+  "sessions": {
+    "s_32b60adb8e42c1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e90d-a12f-7940-ab73-c880044d3821",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    }
+  }
+}
