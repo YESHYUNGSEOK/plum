@@ -546,6 +546,7 @@ public final class StatusServer {
             guard n > 0 else { break }
             data.append(buffer, count: n)
         }
+        guard data.contains(0x0A) else { return }
         let text = String(decoding: data, as: UTF8.self)
 
         for line in text.split(separator: "\n").prefix(32).map(String.init) {

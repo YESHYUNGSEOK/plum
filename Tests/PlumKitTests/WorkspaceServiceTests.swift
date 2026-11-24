@@ -253,6 +253,27 @@ final class WorkspaceServiceTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: ws.path))
     }
 
+    func testForceRemovalKeepsWorktreeWhenChangesCannotBeInspected() throws {
+        let ws = try create("unreadable-index").workspace
+        let gitDirectory = try Git.run(["rev-parse", "--absolute-git-dir"], in: ws.path)
+        try Data("corrupt".utf8).write(to: URL(fileURLWithPath: gitDirectory).appendingPathComponent("index"))
+
+        XCTAssertThrowsError(try WorkspaceService.removeWorktree(ws, project: project, force: true))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: ws.path + "/.env.local"))
+    }
+
+    func testDeleteKeepsNestedWorktreeWhenOuterCannotBeInspected() throws {
+        let outer = try create("unreadable-outer").workspace
+        let innerPath = outer.path + "/inner"
+        try Git.run(["worktree", "add", "-q", "-b", "eric/nested", innerPath], in: project.path)
+        let approved = WorkspaceService.inspect(outer, project: project, deletingBranch: false).nested
+        let gitDirectory = try Git.run(["rev-parse", "--absolute-git-dir"], in: outer.path)
+        try Data("corrupt".utf8).write(to: URL(fileURLWithPath: gitDirectory).appendingPathComponent("index"))
+
+        XCTAssertThrowsError(try WorkspaceService.delete(outer, project: project, force: true, approvedNested: approved))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: innerPath + "/README.md"))
+    }
+
     func testIgnoredFilesAreReportedBeforeRemovingAWorktree() throws {
         let ws = try create("ignored-files").workspace
         try commit(".gitignore", ".private/\n", in: ws.path, "ignore private files")

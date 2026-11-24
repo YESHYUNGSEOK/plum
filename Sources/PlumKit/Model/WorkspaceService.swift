@@ -120,6 +120,9 @@ public enum WorkspaceService {
                               approvedNested: [Git.Worktree]) throws -> [Git.Branch] {
         var kept: [Git.Branch] = []
         if !workspace.isArchived {
+            if FileManager.default.fileExists(atPath: workspace.path) {
+                _ = try Git.uncommittedChanges(in: workspace.path)
+            }
             let nested = FileManager.default.fileExists(atPath: workspace.path) ? nestedWorktrees(workspace, project: project) : []
             guard nested == approvedNested else {
                 throw GitError(message: String(localized: "안쪽 워크트리 목록이 바뀌었습니다. 다시 확인한 뒤 삭제하세요."))
@@ -155,8 +158,11 @@ public enum WorkspaceService {
         guard index != 0, !samePath(workspace.path, project.path) else {
             throw GitError(message: String(localized: "프로젝트의 기본 체크아웃은 지울 수 없습니다."))
         }
-        if !force, FileManager.default.fileExists(atPath: workspace.path), !(try Git.uncommittedChanges(in: workspace.path)).isEmpty {
-            throw GitError(message: String(localized: "워크트리에 저장되지 않은 파일이 있습니다. 확인 후 다시 시도하세요."))
+        if FileManager.default.fileExists(atPath: workspace.path) {
+            let changes = try Git.uncommittedChanges(in: workspace.path)
+            if !force, !changes.isEmpty {
+                throw GitError(message: String(localized: "워크트리에 저장되지 않은 파일이 있습니다. 확인 후 다시 시도하세요."))
+            }
         }
         try Git.removeWorktree(repository: project.path, path: workspace.path, force: force)
     }

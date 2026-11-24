@@ -131,6 +131,39 @@ final class StatusServerSecurityTests: XCTestCase {
         wait(for: [heard], timeout: 2)
     }
 
+    func testIncompleteStatusLineIsIgnored() throws {
+        let tab = UUID()
+        let heard = expectation(description: "incomplete status")
+        heard.isInverted = true
+        let server = StatusServer(directory: directory, onMessage: { id, _, _ in
+            if id == tab { heard.fulfill() }
+        })
+        try server.start()
+        defer { server.stop() }
+
+        let client = socket(AF_UNIX, SOCK_STREAM, 0)
+        XCTAssertGreaterThanOrEqual(client, 0)
+        defer { close(client) }
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        let capacity = MemoryLayout.size(ofValue: address.sun_path)
+        withUnsafeMutablePointer(to: &address.sun_path) { pointer in
+            pointer.withMemoryRebound(to: CChar.self, capacity: capacity) {
+                _ = strlcpy($0, server.path, capacity)
+            }
+        }
+        let connected = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(client, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        XCTAssertEqual(connected, 0)
+        let line = "\(tab.uuidString) waiting incomplete"
+        XCTAssertEqual(line.withCString { write(client, $0, strlen($0)) }, line.utf8.count)
+        XCTAssertEqual(shutdown(client, SHUT_WR), 0)
+        wait(for: [heard], timeout: 0.2)
+    }
+
     private func inode(at path: String) throws -> UInt64 {
         var details = stat()
         guard lstat(path, &details) == 0 else { throw POSIXError(.init(rawValue: errno) ?? .EIO) }
