@@ -1,0 +1,25 @@
+README.ko.md
+  s_bf0ed424735551::t_47bc75ab281b1f 175
+README.md
+  s_bf0ed424735551::t_4b9db8454bebb1 180
+Sources/PlumKit/Model/AppModel.swift
+  s_bf0ed424735551::t_f371e377af75e5 99,152,155,161,790
+Sources/PlumKit/UI/Sidebar.swift
+  s_bf0ed424735551::t_990d7acf0616f9 107,543,796
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "de84d32d99307fe4a01c22bee8da5e2eafff39a0",
+  "prompts": {},
+  "sessions": {
+    "s_bf0ed424735551": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5ac29605-eee3-4cf1-9703-b5fa4086d055",
+        "model": "claude-fable-5-2"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    }
+  }
+}
