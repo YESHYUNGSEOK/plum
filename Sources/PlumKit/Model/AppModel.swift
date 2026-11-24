@@ -13,6 +13,12 @@ public final class TerminalTab: Identifiable {
     /// A program in this tab reported its state through hooks or OSC 7501,
     /// so a plain bell no longer needs to be read as "wants attention".
     @ObservationIgnored var hasStructuredStatus = false
+    /// Its agent reports through Plum's hooks, which know more than the
+    /// terminal's own state signal does (work left running after a turn):
+    /// from then on that signal is passed over. Claude Code sends both, and
+    /// its signal, arriving after the hook, turned "monitoring" back into
+    /// "working", or into "done".
+    @ObservationIgnored var reportsThroughHooks = false
     /// What the program in it last called itself (OSC 0/2). Kept on the tab,
     /// not in one table for all tabs: agents retitle their tab as they work,
     /// and only that tab's label should redraw, not every view of every tab.
@@ -245,7 +251,10 @@ public final class AppModel {
         let server = StatusServer(
             directory: store.directory,
             onMessage: { [weak self] tab, status, message in
-                MainActor.assumeIsolated { self?.setStatus(status, message: message, tab: tab, structured: true) }
+                MainActor.assumeIsolated {
+                    self?.tab(tab)?.reportsThroughHooks = true
+                    self?.setStatus(status, message: message, tab: tab, structured: true)
+                }
             },
             onReport: { [weak self] tab, report in
                 MainActor.assumeIsolated {
@@ -310,7 +319,7 @@ public final class AppModel {
             if tab.agent != agent {
                 tab.agent = agent
                 tab.activeAt = .now
-                if agent == nil { models[tab.id] = nil; toldByStatusLine.remove(tab.id) }
+                if agent == nil { models[tab.id] = nil; toldByStatusLine.remove(tab.id); tab.reportsThroughHooks = false }
                 readReport(of: tab)
             } else if beats % 15 == 0 {
                 // Every 30 s: a model changed mid-session, limits that moved.
@@ -853,6 +862,7 @@ public final class AppModel {
     private func handle(_ signal: TerminalSignal, tab id: UUID) {
         switch signal {
         case let .status(status, message):
+            guard tab(id)?.reportsThroughHooks != true else { return }
             setStatus(status, message: message, tab: id, structured: true)
         case let .notification(title, body):
             // A notification or bell in the tab being watched needs no flag.
