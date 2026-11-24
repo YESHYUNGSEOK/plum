@@ -1,0 +1,27 @@
+Resources/en.lproj/Localizable.strings
+  s_bf0ed424735551::t_2c74d7bc3b5c0c 347-349
+Sources/PlumKit/Model/WorkspaceService.swift
+  s_bf0ed424735551::t_727a3a101448db 25-51
+Sources/PlumKit/UI/AppActions.swift
+  s_bf0ed424735551::t_2748540308be57 75,84-96,113,157-159,161-166
+Sources/PlumKit/UI/Sheets.swift
+  s_bf0ed424735551::t_9ac5e9a7eb42a5 50-52,950,956,961,979-997
+Tests/PlumKitTests/RemovalLossesTests.swift
+  s_bf0ed424735551::t_af885d25d0d755 1-104
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1b5ec17daf025c79ce20b07d4cd60c054975fa67",
+  "prompts": {},
+  "sessions": {
+    "s_bf0ed424735551": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5ac29605-eee3-4cf1-9703-b5fa4086d055",
+        "model": "claude-fable-5-2"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    }
+  }
+}
