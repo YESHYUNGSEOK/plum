@@ -1,0 +1,21 @@
+Sources/PlumKit/Model/AppModel.swift
+  s_bf0ed424735551::t_c93a162a791356 101-114,211-214,216
+Sources/PlumKit/Model/StatusServer.swift
+  s_bf0ed424735551::t_6cd4d9b9e10a12 47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "753d74ae10592d590df3863a6a23719ad9c3997f",
+  "prompts": {},
+  "sessions": {
+    "s_bf0ed424735551": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5ac29605-eee3-4cf1-9703-b5fa4086d055",
+        "model": "claude-fable-5-2"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    }
+  }
+}
