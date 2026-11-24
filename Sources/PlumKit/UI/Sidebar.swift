@@ -104,6 +104,7 @@ struct SidebarView: View {
                 }
             }
             HStack {
+                if model.state.settings.showAgentUsage { PlanUsage(limits: model.limits) }
                 Spacer()
                 IconButton(systemName: "slider.horizontal.3", label: String(localized: "설정")) { model.sheet = .settings }
             }
@@ -453,6 +454,48 @@ private struct ProjectSection: View {
     }
 }
 
+/// How much of each agent's plan limits is used, as the agents last said:
+/// the agent's icon, then a bar for the session (5-hour) and the weekly limit.
+private struct PlanUsage: View {
+    let limits: [TabProgram: AgentReport]
+
+    var body: some View {
+        let hasSession = limits.values.contains { $0.session != nil }
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach([TabProgram.claude, .codex]) { agent in
+                if let plan = limits[agent] {
+                    HStack(spacing: 8) {
+                        Image(nsImage: agent.icon).resizable().frame(width: 12, height: 12)
+                        // An agent without a session limit keeps the column, so weekly sits under weekly.
+                        if let session = plan.session { bar("세션", session, resets: plan.sessionResets) } else if hasSession { bar("세션", 0).hidden() }
+                        if let weekly = plan.weekly { bar("주간", weekly, resets: plan.weeklyResets) }
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(Text(verbatim: agent.name))
+                }
+            }
+        }
+        .font(.system(size: 10.5).monospacedDigit())
+        .foregroundStyle(Theme.secondary)
+        .lineLimit(1)
+        .fixedSize()
+    }
+
+    private func bar(_ label: LocalizedStringKey, _ used: Double, resets: Date? = nil) -> some View {
+        HStack(spacing: 4) {
+            Text(label)
+            Capsule().fill(Theme.ring)
+                .frame(width: 36, height: 4)
+                .overlay(alignment: .leading) {
+                    Capsule().fill(Theme.secondary).frame(width: 36 * min(max(used, 0), 100) / 100)
+                }
+            Text(verbatim: "\(Int(used.rounded()))%")
+        }
+        // When it starts over, on hover: "in 3 hours (24 Nov, 13:00)".
+        .help(resets.map { String(localized: "\($0.formatted(.relative(presentation: .numeric))) 초기화 (\($0.formatted(date: .abbreviated, time: .shortened)))") } ?? "")
+    }
+}
+
 private struct WorkspaceRow: View {
     let model: AppModel
     let workspace: Workspace
@@ -497,6 +540,7 @@ private struct WorkspaceRow: View {
                         TabLine(
                             tab: tab, status: model.statuses[tab.id] ?? .idle,
                             isActive: isSelected && model.activeTabs[workspace.id] == tab.id,
+                            model: model.state.settings.showAgentUsage ? model.models[tab.id] : nil,
                             show: { model.reveal(tab: tab.id) },
                             close: { AppActions.closeTab(model, tab.id) })
                         .transition(.opacity)
@@ -749,50 +793,63 @@ private struct TabLine: View {
     let status: AgentStatus
     /// The tab on screen now.
     let isActive: Bool
+    /// The agent's model, shown under the title (Settings).
+    var model: String?
     let show: () -> Void
     let close: () -> Void
     @State private var hovering = false
 
     var body: some View {
         let agent = tab.agent
-        HStack(spacing: 6) {
-            Button(action: show) {
-                HStack(spacing: 6) {
-                    Image(nsImage: (agent ?? .terminal).icon).resizable().frame(width: 12, height: 12)
-                    Text(verbatim: TabTitle.label(tab))
-                        .font(.system(size: 12, weight: isActive ? .medium : .regular))
-                        .foregroundStyle(isActive ? Theme.rowText : Theme.secondary)
-                        .lineLimit(1)
-                    Spacer(minLength: 4)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Button(action: show) {
+                    HStack(spacing: 6) {
+                        Image(nsImage: (agent ?? .terminal).icon).resizable().frame(width: 12, height: 12)
+                        Text(verbatim: TabTitle.label(tab))
+                            .font(.system(size: 12, weight: isActive ? .medium : .regular))
+                            .foregroundStyle(isActive ? Theme.rowText : Theme.secondary)
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                    }
+                    .contentShape(Rectangle())
                 }
-                .contentShape(Rectangle())
+                .buttonStyle(RowButtonStyle())
+                ForEach(tab.ports.prefix(2), id: \.self) { PortLink(port: $0) }
+                if status != .idle { StatusMark(status: status) }
+                if hovering {
+                    Button(action: close) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 8, weight: .bold))
+                            .frame(width: 14, height: 14)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.secondary)
+                    .help("탭 닫기")
+                } else if agent != nil {
+                    TimelineView(.everyMinute) { context in
+                        Text(Duration.seconds(max(context.date.timeIntervalSince(tab.activeAt), 60))
+                            .formatted(.units(allowed: [.days, .hours, .minutes], width: .narrow, maximumUnitCount: 1)))
+                    }
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.tertiary)
+                }
             }
-            .buttonStyle(RowButtonStyle())
-            ForEach(tab.ports.prefix(2), id: \.self) { PortLink(port: $0) }
-            if status != .idle { StatusMark(status: status) }
-            if hovering {
-                Button(action: close) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 8, weight: .bold))
-                        .frame(width: 14, height: 14)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(Theme.secondary)
-                .help("탭 닫기")
-            } else if agent != nil {
-                TimelineView(.everyMinute) { context in
-                    Text(Duration.seconds(max(context.date.timeIntervalSince(tab.activeAt), 60))
-                        .formatted(.units(allowed: [.days, .hours, .minutes], width: .narrow, maximumUnitCount: 1)))
-                }
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.tertiary)
+            .padding(.horizontal, 4)
+            .frame(height: 20)
+            .background(RoundedRectangle(cornerRadius: 5).fill(hovering ? Theme.hoveredRow : .clear))
+            // The highlight reaches a little past the line; its text stays in line with the name.
+            if let model {
+                // Under the title, past the icon.
+                Text(verbatim: model)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(Theme.secondary)
+                    .lineLimit(1)
+                    .padding(.leading, 22)
+                    .padding(.bottom, 3)
             }
         }
-        .padding(.horizontal, 4)
-        .frame(height: 20)
-        .background(RoundedRectangle(cornerRadius: 5).fill(hovering ? Theme.hoveredRow : .clear))
-        // The highlight reaches a little past the line; its text stays in line with the name.
         .padding(.horizontal, -4)
         .onHover { hovering = $0 }
         .animation(Motion.hover, value: hovering)

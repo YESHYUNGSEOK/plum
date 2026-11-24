@@ -36,6 +36,91 @@ public enum StatusMessage {
 
 /// The settings file handed to Claude Code with `--settings`, so its hooks
 /// report to Plum without touching the user's own configuration.
+/// What an agent says of itself: its model, and how much of the plan's
+/// 5-hour ("session") and weekly limits is used, in percent.
+public struct AgentReport: Equatable, Sendable {
+    public var model: String?
+    public var session: Double?
+    public var weekly: Double?
+    /// When each limit starts over.
+    public var sessionResets: Date?
+    public var weeklyResets: Date?
+
+    /// "<tab> statusline <json>": Claude Code's status line input, passed on by Plum's status line command.
+    public static func parse(_ line: String) -> (tab: UUID, report: AgentReport)? {
+        let parts = line.split(separator: " ", maxSplits: 2).map(String.init)
+        guard parts.count == 3, parts[1] == "statusline", let tab = UUID(uuidString: parts[0]),
+              let input = try? JSONSerialization.jsonObject(with: Data(parts[2].utf8)) as? [String: Any] else { return nil }
+        let limits = input["rate_limits"] as? [String: Any]
+        func used(_ window: String) -> Double? { ((limits?[window] as? [String: Any])?["used_percentage"] as? NSNumber)?.doubleValue }
+        func resets(_ window: String) -> Date? { date((limits?[window] as? [String: Any])?["resets_at"]) }
+        let model = ((input["model"] as? [String: Any])?["display_name"] as? String).map { sanitizeForDisplay($0, limit: 40) }
+        return (tab, AgentReport(model: model, session: used("five_hour"), weekly: used("seven_day"),
+                                 sessionResets: resets("five_hour"), weeklyResets: resets("seven_day")))
+    }
+
+    /// Both agents give the time as Unix seconds.
+    private static func date(_ seconds: Any?) -> Date? {
+        (seconds as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue) }
+    }
+
+    /// From a Codex session file: the last turn's model and the limits Codex
+    /// was last told. Only those two records are parsed, found from the end
+    /// (a turn names its model once, megabytes before the file's end).
+    public static func codex(session data: Data) -> AgentReport {
+        func last(_ type: String) -> [String: Any]? {
+            guard let at = data.range(of: Data("\"type\":\"\(type)\"".utf8), options: .backwards) else { return nil }
+            let start = data[..<at.lowerBound].lastIndex(of: 0x0A).map { $0 + 1 } ?? data.startIndex
+            let end = data[at.upperBound...].firstIndex(of: 0x0A) ?? data.endIndex
+            return ((try? JSONSerialization.jsonObject(with: data[start..<end])) as? [String: Any])?["payload"] as? [String: Any]
+        }
+        var report = AgentReport(model: (last("turn_context")?["model"] as? String).map { sanitizeForDisplay($0, limit: 40) })
+        let limits = last("token_count")?["rate_limits"] as? [String: Any]
+        for key in ["primary", "secondary"] {
+            guard let window = limits?[key] as? [String: Any], let used = (window["used_percent"] as? NSNumber)?.doubleValue,
+                  let minutes = (window["window_minutes"] as? NSNumber)?.intValue else { continue }
+            // Codex names its windows by length: hours for the session one, a week for the other.
+            if minutes < 1440 {
+                (report.session, report.sessionResets) = (used, date(window["resets_at"]))
+            } else {
+                (report.weekly, report.weeklyResets) = (used, date(window["resets_at"]))
+            }
+        }
+        return report
+    }
+}
+
+/// Codex's session files (`sessions/YYYY/MM/DD/rollout-*.jsonl` in CODEX_HOME).
+/// Its hooks don't say which file is theirs, so a tab's is found by folder.
+/// ponytail: by folder and recency. Two Codex tabs in one folder both show
+/// the newer session's model, and a session older than yesterday isn't
+/// found; pass the session id through the hook if that matters.
+public enum CodexSessions {
+    public static func report(in folder: String, home: String = (CodexHooks.file() as NSString).deletingLastPathComponent,
+                              now: Date = Date()) -> AgentReport? {
+        let manager = FileManager.default
+        let days = [now, now.addingTimeInterval(-86400)].map { day -> URL in
+            let parts = Calendar.current.dateComponents([.year, .month, .day], from: day)
+            return URL(fileURLWithPath: home).appendingPathComponent(
+                String(format: "sessions/%04d/%02d/%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0))
+        }
+        let files = days.flatMap { (try? manager.contentsOfDirectory(at: $0, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [] }
+            .filter { $0.lastPathComponent.hasPrefix("rollout-") && $0.pathExtension == "jsonl" }
+            .sorted { modified($0) > modified($1) }
+        let marker = Data("\"cwd\":\"\(folder)\"".utf8)
+        for file in files.prefix(8) {
+            // The session's first record names its folder. Mapped, not read: only what is searched is paged in.
+            guard let data = try? Data(contentsOf: file, options: .mappedIfSafe), data.prefix(1 << 16).range(of: marker) != nil else { continue }
+            return AgentReport.codex(session: data)
+        }
+        return nil
+    }
+
+    private static func modified(_ file: URL) -> Date {
+        (try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+    }
+}
+
 public enum HookSettings {
     /// The Stop hook hands over what it was given (one line of JSON) and
     /// lets Plum tell "done" from "waiting for background work".
@@ -50,13 +135,32 @@ public enum HookSettings {
         }.joined(separator: "; ") + "; true"
     }
 
-    public static func claudeSettings() -> Data {
+    /// Claude Code's own status line command (settings.json in its config folder), if the user set one.
+    public static func userStatusLine(environment: [String: String] = ProcessInfo.processInfo.environment,
+                                      home: String = NSHomeDirectory()) -> String {
+        let folder = environment["CLAUDE_CONFIG_DIR"] ?? (home as NSString).appendingPathComponent(".claude")
+        guard let data = FileManager.default.contents(atPath: (folder as NSString).appendingPathComponent("settings.json")),
+              let settings = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return "" }
+        return (settings["statusLine"] as? [String: Any])?["command"] as? String ?? ""
+    }
+
+    /// Passes Claude Code's status line input (its model and plan limits)
+    /// to Plum, then on to the user's own status line command, whose
+    /// output is the line shown: a status line given with `--settings`
+    /// takes the place of theirs.
+    static func statusLineCommand(then own: String) -> String {
+        #"input=$(cat); [ -n "$PLUM_TAB_ID" ] && [ -S "$PLUM_SOCKET" ] && printf '%s statusline %s\n' "$PLUM_TAB_ID" "$(printf '%s' "$input" | tr -d '\n')" | /usr/bin/nc -w 1 -U "$PLUM_SOCKET" >/dev/null 2>&1"#
+            + (own.isEmpty ? "; true" : "; printf '%s' \"$input\" | { \(own)\n}")
+    }
+
+    /// `statusLine`: the user's own status line command to run after Plum's (empty for none), or nil to leave status lines alone.
+    public static func claudeSettings(statusLine: String? = nil) -> Data {
         func group(_ state: String, matcher: String? = nil) -> [[String: Any]] {
             var entry: [String: Any] = ["hooks": [["type": "command", "command": command(state)]]]
             if let matcher { entry["matcher"] = matcher }
             return [entry]
         }
-        let settings: [String: Any] = ["hooks": [
+        var settings: [String: Any] = ["hooks": [
             "UserPromptSubmit": group("working"),
             "PreToolUse": group("working"),
             "PostToolUse": group("working"),
@@ -66,6 +170,9 @@ public enum HookSettings {
             "StopFailure": group("done"),
             "SessionEnd": group("idle"),
         ]]
+        if let statusLine {
+            settings["statusLine"] = ["type": "command", "command": statusLineCommand(then: statusLine)]
+        }
         return try! JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys])
     }
 }
@@ -164,18 +271,21 @@ public final class StatusServer {
     private var listener: Int32 = -1
     private var source: DispatchSourceRead?
     private let onMessage: (UUID, AgentStatus, String) -> Void
+    private let onReport: (UUID, AgentReport) -> Void
     /// Test hook: answers lines starting with "debug ". Runs on the main thread.
     private let debugHandler: ((String) -> String)?
 
     public init(
         directory: URL,
         onMessage: @escaping (UUID, AgentStatus, String) -> Void,
+        onReport: @escaping (UUID, AgentReport) -> Void = { _, _ in },
         debugHandler: ((String) -> String)? = nil
     ) {
         // sun_path holds 104 bytes; fall back to the per-user temp folder.
         let preferred = directory.appendingPathComponent("plum.sock").path
         path = preferred.utf8.count < 100 ? preferred : NSTemporaryDirectory() + "plum.sock"
         self.onMessage = onMessage
+        self.onReport = onReport
         self.debugHandler = debugHandler
     }
 
@@ -247,6 +357,8 @@ public final class StatusServer {
             if line.hasPrefix("debug "), let debugHandler {
                 let reply = DispatchQueue.main.sync { debugHandler(String(line.dropFirst(6))) } + "\n"
                 _ = reply.withCString { write(client, $0, strlen($0)) }
+            } else if let said = AgentReport.parse(line) {
+                DispatchQueue.main.async { [onReport] in onReport(said.tab, said.report) }
             } else if let message = StatusMessage.parse(line) {
                 DispatchQueue.main.async { [onMessage] in onMessage(message.tab, message.status, message.message) }
             }

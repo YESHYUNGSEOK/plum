@@ -745,6 +745,12 @@ struct SettingsSheet: View {
                     .foregroundStyle(Theme.secondary)
             }
             .toggleStyle(.checkbox)
+            Toggle(isOn: $settings.showAgentUsage) {
+                Text("에이전트의 모델과 사용량 표시: 탭 아래에 모델, 사이드바 아래에 세션·주간 한도 (새로 시작한 Claude부터)")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.secondary)
+            }
+            .toggleStyle(.checkbox)
             Toggle(isOn: $settings.optionAsMeta) {
                 Text("⌥를 Meta 키로 사용 (⌥B, ⌥. 같은 셸 단축키)")
                     .font(.system(size: 12))

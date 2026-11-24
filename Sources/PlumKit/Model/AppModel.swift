@@ -96,6 +96,10 @@ public final class AppModel {
     /// A newer release the daily check found: a toast offers it until it is
     /// dismissed or installed.
     public var availableUpdate: Updates.Release?
+    /// Each agent tab's model and each agent's plan limits, as last reported
+    /// (Settings: showAgentUsage).
+    public private(set) var models: [UUID: String] = [:]
+    public private(set) var limits: [TabProgram: AgentReport] = [:]
     public var sheet: AppSheet?
     /// Each project's own icon from its repository (ProjectIcon), if it has one.
     public private(set) var projectIcons: [UUID: NSImage] = [:]
@@ -146,11 +150,36 @@ public final class AppModel {
         save()
     }
 
+    /// The settings file Claude is started with: Plum's hooks, and with
+    /// usage shown, its status line.
+    private func writeHookSettings() {
+        let file = store.directory.appendingPathComponent("claude-hooks.json")
+        let statusLine = state.settings.showAgentUsage ? HookSettings.userStatusLine() : nil
+        try? HookSettings.claudeSettings(statusLine: statusLine).write(to: file, options: .atomic)
+        hookSettingsPath = file.path
+    }
+
+    /// What an agent said of itself. Unknown tabs are ignored: the socket is external input.
+    func take(_ report: AgentReport, from agent: TabProgram, tab id: UUID) {
+        guard state.settings.showAgentUsage, tab(id) != nil else { return }
+        if let model = report.model, models[id] != model { models[id] = model }
+        var plan = report
+        plan.model = nil
+        if plan != AgentReport(), limits[agent] != plan { limits[agent] = plan }
+    }
+
+    /// Codex says nothing through its hooks: its session file is read when its state changes.
+    private func readCodexReport(of tab: TerminalTab, in workspace: Workspace) {
+        let id = tab.id, folder = tab.session.currentDirectory() ?? workspace.path
+        Task {
+            let report = await Task.detached(priority: .utility) { CodexSessions.report(in: folder) }.value
+            if let report { take(report, from: .codex, tab: id) }
+        }
+    }
+
     /// Starts listening for agent hooks. Call once at launch.
     public func start(debug: Bool = false) {
-        let settings = store.directory.appendingPathComponent("claude-hooks.json")
-        try? HookSettings.claudeSettings().write(to: settings, options: .atomic)
-        hookSettingsPath = settings.path
+        writeHookSettings()
         let zsh = store.directory.appendingPathComponent("shell/zsh", isDirectory: true)
         if (try? FileManager.default.createDirectory(at: zsh, withIntermediateDirectories: true)) != nil,
            (try? Data(ShellIntegration.zshenv.utf8).write(to: zsh.appendingPathComponent(".zshenv"), options: .atomic)) != nil {
@@ -163,6 +192,9 @@ public final class AppModel {
             directory: store.directory,
             onMessage: { [weak self] tab, status, message in
                 MainActor.assumeIsolated { self?.setStatus(status, message: message, tab: tab, structured: true) }
+            },
+            onReport: { [weak self] tab, report in
+                MainActor.assumeIsolated { self?.take(report, from: .claude, tab: tab) }
             },
             debugHandler: debug ? { [weak self] line in
                 MainActor.assumeIsolated { self?.handleDebug(line) ?? "" }
@@ -587,6 +619,7 @@ public final class AppModel {
         list.remove(at: at)
         tabs[tab.workspaceID] = list
         statuses[id] = nil
+        models[id] = nil
         if activeTabs[tab.workspaceID] == id {
             let bar = tabBarTabs(in: tab.workspaceID)
             activeTabs[tab.workspaceID] = sibling ?? (bar.isEmpty ? nil : bar[min(index, bar.count - 1)].id)
@@ -757,6 +790,9 @@ public final class AppModel {
         statuses[id] = effective == .idle ? nil : effective
         tab.activeAt = .now
         refreshChanges(tab.workspaceID) // an agent that stops has usually just edited files
+        if state.settings.showAgentUsage, tab.agent == .codex, let workspace = workspace(tab.workspaceID) {
+            readCodexReport(of: tab, in: workspace)
+        }
 
         if !visible, effective == .waiting || effective == .done, let workspace = workspace(tab.workspaceID) {
             let project = project(workspace.projectID)?.name ?? ""
@@ -1152,8 +1188,14 @@ public final class AppModel {
         let terminalChanged = (settings.cursorShape, settings.cursorBlinks, settings.scrollbackMB)
             != (state.settings.cursorShape, state.settings.cursorBlinks, state.settings.scrollbackMB)
         let lookChanged = settings.accent != state.settings.accent
+        let usageChanged = settings.showAgentUsage != state.settings.showAgentUsage
         state.settings = settings
         save()
+        if usageChanged {
+            // Claude reads the file when it starts: sessions already running keep what they had.
+            writeHookSettings()
+            if !settings.showAgentUsage { (models, limits) = ([:], [:]) }
+        }
         if terminalChanged { for tab in tabs.values.joined() { applyPreferences(to: tab.session) } }
         if lookChanged { onLookChanged?() }
     }
