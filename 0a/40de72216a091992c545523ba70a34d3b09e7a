@@ -1,0 +1,19 @@
+scripts/bundle.sh
+  s_d34c0e3831d077::t_701fb0365251b9 44-45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0a40de72216a091992c545523ba70a34d3b09e7a",
+  "prompts": {},
+  "sessions": {
+    "s_d34c0e3831d077": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_d34c0e3831d077",
+        "model": "unknown"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    }
+  }
+}
