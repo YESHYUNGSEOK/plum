@@ -51,12 +51,39 @@ public final class TerminalHost {
     }
 
     private static func socketPath(for store: Store, version: Int, codeHash: String? = nil) -> String {
+        let suffix = codeHash.map { "-\($0.prefix(12))" } ?? ""
+        return NSTemporaryDirectory() + "plum-host-\(version)-\(storeHash(store))\(suffix).sock"
+    }
+
+    private static func storeHash(_ store: Store) -> String {
         var hash: UInt64 = 0xCBF2_9CE4_8422_2325 // FNV-1a: the same every launch, unlike hashValue
         for byte in store.directory.standardizedFileURL.path.utf8 {
             hash = (hash ^ UInt64(byte)) &* 0x100_0000_01B3
         }
-        let suffix = codeHash.map { "-\($0.prefix(12))" } ?? ""
-        return NSTemporaryDirectory() + "plum-host-\(version)-\(String(hash, radix: 16))\(suffix).sock"
+        return String(hash, radix: 16)
+    }
+
+    /// Whether a host of this store's, of any version, is listening other than
+    /// those at `asked`: one this app couldn't ask may still hold terminals.
+    /// Only connects; nothing is sent.
+    public static func hasHosts(for store: Store, besides asked: [String]) -> Bool {
+        let folder = NSTemporaryDirectory(), mark = "-\(storeHash(store))"
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: folder)) ?? []
+        return names.contains { name in
+            guard name.hasPrefix("plum-host-"), name.hasSuffix(".sock"),
+                  name.contains(mark + ".") || name.contains(mark + "-"), !asked.contains(folder + name) else { return false }
+            var address = sockaddr_un()
+            address.sun_family = sa_family_t(AF_UNIX)
+            let path = Array((folder + name).utf8)
+            guard path.count < MemoryLayout.size(ofValue: address.sun_path) else { return false }
+            withUnsafeMutableBytes(of: &address.sun_path) { $0.copyBytes(from: path) }
+            let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+            guard fd >= 0 else { return false }
+            defer { close(fd) }
+            return withUnsafePointer(to: &address) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) == 0 }
+            }
+        }
     }
 
     /// Runs the host until it has had no terminals for a minute.
@@ -637,7 +664,7 @@ public final class TerminalHostClient: @unchecked Sendable {
         public let rows: UInt16
     }
 
-    private let socketPath: String
+    public let socketPath: String
     private let expectedVersion: Int
     private let trustedLegacy: (hash: String, pid: pid_t, version: UInt32)?
     /// One connection for requests; terminals get connections of their own.

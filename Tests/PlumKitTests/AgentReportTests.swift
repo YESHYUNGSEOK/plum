@@ -187,4 +187,25 @@ final class AgentReportTests: XCTestCase {
         XCTAssertEqual(titles, ["🐱 alpha · one", "👍 alpha · one", "😡 alpha · one"])
         model.closeTab(tab.id)
     }
+
+    func testCodexLimitsSayWhenAndAccountIsRead() throws {
+        let said = Data(#"{"timestamp":"2026-11-24T14:59:54.240Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":4.0,"window_minutes":10080}}}}"#.utf8)
+        let report = AgentReport.codex(session: said)
+        XCTAssertEqual(report.weekly, 4)
+        XCTAssertEqual(report.at, Date(timeIntervalSince1970: 1795532394.24))
+        // No limits said: no time either, so it never replaces what is held.
+        let empty = Data(#"{"timestamp":"2026-11-24T14:59:54.240Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{}}}"#.utf8)
+        XCTAssertEqual(AgentReport.codex(session: empty), AgentReport())
+
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("plum-codex-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        XCTAssertNil(CodexSessions.account(home: home.path))
+        try Data(#"{"tokens":{"account_id":"a"}}"#.utf8).write(to: home.appendingPathComponent("auth.json"))
+        let first = try XCTUnwrap(CodexSessions.account(home: home.path))
+        try Data(#"{"tokens":{"account_id":"b"}}"#.utf8).write(to: home.appendingPathComponent("auth.json"))
+        let second = try XCTUnwrap(CodexSessions.account(home: home.path))
+        XCTAssertNotEqual(first.id, second.id)
+        XCTAssertEqual(first.id.count, 64) // a digest, not the id itself
+    }
 }

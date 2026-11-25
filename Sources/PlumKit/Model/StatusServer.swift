@@ -54,6 +54,8 @@ public struct AgentReport: Equatable, Sendable, Codable {
     /// When each limit starts over.
     public var sessionResets: Date?
     public var weeklyResets: Date?
+    /// When the limits were said, where that is known: an older saying doesn't replace a newer one.
+    public var at: Date?
 
     static func percent(_ value: Double?) -> Double? {
         guard let value, value.isFinite, (0...100).contains(value) else { return nil }
@@ -87,12 +89,13 @@ public struct AgentReport: Equatable, Sendable, Codable {
             guard let at = data.range(of: Data("\"type\":\"\(type)\"".utf8), options: .backwards) else { return nil }
             let start = data[..<at.lowerBound].lastIndex(of: 0x0A).map { $0 + 1 } ?? data.startIndex
             let end = data[at.upperBound...].firstIndex(of: 0x0A) ?? data.endIndex
-            return ((try? JSONSerialization.jsonObject(with: data[start..<end])) as? [String: Any])?["payload"] as? [String: Any]
+            return (try? JSONSerialization.jsonObject(with: data[start..<end])) as? [String: Any]
         }
-        let turn = last("turn_context")
+        let turn = last("turn_context")?["payload"] as? [String: Any]
         var report = AgentReport(model: (turn?["model"] as? String).map { sanitizeForDisplay($0, limit: 40) },
                                  effort: (turn?["effort"] as? String).map { sanitizeForDisplay($0, limit: 12) })
-        let limits = last("token_count")?["rate_limits"] as? [String: Any]
+        let count = last("token_count")
+        let limits = (count?["payload"] as? [String: Any])?["rate_limits"] as? [String: Any]
         for key in ["primary", "secondary"] {
             guard let window = limits?[key] as? [String: Any], let used = (window["used_percent"] as? NSNumber)?.doubleValue,
                   let minutes = (window["window_minutes"] as? NSNumber)?.intValue else { continue }
@@ -102,6 +105,11 @@ public struct AgentReport: Equatable, Sendable, Codable {
             } else {
                 (report.weekly, report.weeklyResets) = (percent(used), date(window["resets_at"]))
             }
+        }
+        if report.session != nil || report.weekly != nil, let said = count?["timestamp"] as? String {
+            let format = ISO8601DateFormatter()
+            format.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            report.at = format.date(from: said)
         }
         return report
     }
@@ -135,6 +143,17 @@ public enum CodexSessions {
 
     private static func modified(_ file: URL) -> Date {
         (try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+    }
+
+    /// Which account Codex is logged in to (a digest of its id, not the id) and
+    /// when the login file was last written: limits said before a change of
+    /// account are the other account's.
+    public static func account(home: String = (CodexHooks.file() as NSString).deletingLastPathComponent) -> (id: String, written: Date)? {
+        let file = URL(fileURLWithPath: home).appendingPathComponent("auth.json")
+        guard let data = try? Data(contentsOf: file), data.count < 1 << 20,
+              let login = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let id = (login["tokens"] as? [String: Any])?["account_id"] as? String else { return nil }
+        return (SHA256.hash(data: Data(id.utf8)).map { String(format: "%02x", $0) }.joined(), modified(file))
     }
 }
 

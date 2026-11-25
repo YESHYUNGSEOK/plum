@@ -203,6 +203,8 @@ public final class AppModel {
         (plan.model, plan.effort) = (nil, nil)
         plan.session = AgentReport.percent(plan.session)
         plan.weekly = AgentReport.percent(plan.weekly)
+        // Several tabs' session files say Codex's limits: the latest saying holds.
+        if let held = limits[agent]?.at, let at = plan.at, at < held { return }
         if plan != AgentReport(), limits[agent] != plan { limits[agent] = plan }
     }
 
@@ -215,9 +217,14 @@ public final class AppModel {
         guard let agent = tab.agent, !toldByStatusLine.contains(tab.id), let workspace = workspace(tab.workspaceID) else { return }
         let id = tab.id, folder = tab.session.currentDirectory() ?? workspace.path
         Task {
-            let report = await Task.detached(priority: .utility) {
-                agent == .codex ? CodexSessions.report(in: folder) : ClaudeSessions.report(in: folder)
+            let (report, account) = await Task.detached(priority: .utility) {
+                agent == .codex ? (CodexSessions.report(in: folder), CodexSessions.account()) : (ClaudeSessions.report(in: folder), nil)
             }.value
+            // Another Codex account: what is held is the old one's, and so is anything said before the change.
+            if let account, account.id != UserDefaults.standard.string(forKey: "codexAccount") {
+                UserDefaults.standard.set(account.id, forKey: "codexAccount")
+                limits[.codex] = AgentReport(at: account.written)
+            }
             if let report { take(report, from: agent, tab: id) }
         }
         if agent == .claude { askClaudeUsage() }
@@ -596,6 +603,10 @@ public final class AppModel {
         }
         let restored = Set(tabs.values.joined().map(\.id))
         unrestoredTabs = state.tabs.filter { !restored.contains($0.id) }
+        // A terminal lives only in a host. With no host left that couldn't be
+        // asked, what wasn't found has ended (a restart of the Mac, a host
+        // that was stopped): nothing to keep, and nothing to hold an update for.
+        if !unrestoredTabs.isEmpty, !TerminalHost.hasHosts(for: store, besides: sources.map(\.0.socketPath)) { unrestoredTabs = [] }
         // Splits again, with the panes whose terminals came back; a split
         // whose head is gone is headed by its next pane.
         let open = Set(tabs.values.joined().map(\.id))

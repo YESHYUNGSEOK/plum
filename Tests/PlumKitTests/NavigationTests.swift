@@ -257,6 +257,12 @@ final class NavigationTests: XCTestCase {
         let secureClient = try XCTUnwrap(TerminalHostClient(socketPath: securePath, executable: "/nonexistent"))
         defer { for session in secureClient.list() { secureClient.close(session.id) } }
 
+        // The old host still runs, but this app couldn't ask it.
+        let oldPath = TerminalHost.legacySocketPath(for: store)
+        let oldServer = TerminalHost(socketPath: oldPath)
+        try oldServer.listen()
+        defer { unlink(oldPath) }
+
         let model = AppModel(store: store)
         model.restoreTabs(secureHost: secureClient, legacyHost: nil)
 
@@ -265,6 +271,22 @@ final class NavigationTests: XCTestCase {
         let fresh = try XCTUnwrap(model.openTab(in: project.id))
         XCTAssertEqual(Set(try store.load().tabs.map(\.id)), Set([saved.id, other.id, fresh.id]))
         XCTAssertEqual(try store.load().splits[saved.id.uuidString], split)
+    }
+
+    func testSavedTabsOfEndedTerminalsAreDroppedWhenNoHostIsLeft() throws {
+        let store = Store(directory: directory.appendingPathComponent("ended-state"))
+        let project = Project(name: "checkout", path: directory.path)
+        var state = AppState()
+        state.projects = [project]
+        state.tabs = [SavedTab(id: UUID(), workspace: project.id, title: "ended", active: true)]
+        try store.save(state)
+
+        let model = AppModel(store: store)
+        XCTAssertTrue(model.hasTerminalsUpdateCannotRestore)
+        model.restoreTabs(secureHost: nil, legacyHost: nil)
+
+        XCTAssertFalse(model.hasTerminalsUpdateCannotRestore)
+        XCTAssertEqual(try store.load().tabs, [])
     }
 
     func testUnknownWorkspaceDoesNotCloseARunningLegacySession() throws {
@@ -288,7 +310,7 @@ final class NavigationTests: XCTestCase {
         XCTAssertTrue(oldClient.list().contains { $0.id == id })
     }
 
-    func testEmptyHostReplyDoesNotEraseSavedTabs() throws {
+    func testSavedTabNoRunningHostHoldsIsDropped() throws {
         let store = Store(directory: directory.appendingPathComponent("empty-host-state"))
         let project = Project(name: "checkout", path: directory.path)
         let saved = SavedTab(id: UUID(), workspace: project.id, title: "running", active: true)
@@ -310,7 +332,9 @@ final class NavigationTests: XCTestCase {
         let model = AppModel(store: store)
         model.restoreTabs(secureHost: secureClient, legacyHost: legacyClient)
 
-        XCTAssertEqual(try store.load().tabs, [saved])
+        // Every running host was asked and none holds it: it has ended.
+        XCTAssertEqual(try store.load().tabs, [])
+        XCTAssertFalse(model.hasTerminalsUpdateCannotRestore)
     }
 
     func testSwitcherPutsRecentFirstAndRanksMatches() {
