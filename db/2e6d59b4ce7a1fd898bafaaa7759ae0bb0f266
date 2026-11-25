@@ -1,0 +1,29 @@
+Sources/PlumKit/Model/AppModel.swift
+  s_bf0ed424735551::t_f3990c233c1337 206-207,220-221,223-227,606-609
+Sources/PlumKit/Model/StatusServer.swift
+  s_bf0ed424735551::t_8971fb59daac7f 57-58,92,94,97-98,109-113,147-157
+Sources/PlumKit/Terminal/TerminalHost.swift
+  s_bf0ed424735551::t_bfb45d6f6e75a8 54-58,63-86,667
+Tests/PlumKitTests/AgentReportTests.swift
+  s_bf0ed424735551::t_2687fab641fbd8 190-210
+Tests/PlumKitTests/NavigationTests.swift
+  s_bf0ed424735551::t_cba44c0019d8fe 260-265,276-291,313,335-337
+scripts/bundle.sh
+  s_bf0ed424735551::t_64491de01aa902 44-45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "db2e6d59b4ce7a1fd898bafaaa7759ae0bb0f266",
+  "prompts": {},
+  "sessions": {
+    "s_bf0ed424735551": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5ac29605-eee3-4cf1-9703-b5fa4086d055",
+        "model": "claude-fable-5-2"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    }
+  }
+}
