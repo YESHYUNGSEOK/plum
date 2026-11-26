@@ -1,0 +1,21 @@
+.github/pull_request_template.md
+  s_bf0ed424735551::t_1f59eaf85f2511 1-2
+CONTRIBUTING.md
+  s_bf0ed424735551::t_30d2b9c85acaeb 82-137
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3c5a4c9607350e28f77689d889f6d8f1a75f211b",
+  "prompts": {},
+  "sessions": {
+    "s_bf0ed424735551": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5ac29605-eee3-4cf1-9703-b5fa4086d055",
+        "model": "claude-fable-5-2"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    }
+  }
+}
