@@ -1,0 +1,29 @@
+name: Pull request title
+
+# The title becomes the commit on main (pull requests are squashed), so it
+# follows the commit convention in CONTRIBUTING.md.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions: {}
+
+jobs:
+  title:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check the form
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          pattern='^(fix|feat|perf|docs|refactor|test|chore|release)(\([a-z0-9-]+\))?!?: [^A-Z ].*[^. ]$'
+          if [[ ${#TITLE} -gt 72 ]]; then
+            echo "::error::The title is ${#TITLE} characters; 72 at most."
+            exit 1
+          fi
+          if [[ ! "$TITLE" =~ $pattern ]]; then
+            echo "::error::The title should read '<type>: <what the change does>', e.g. 'fix: keep the selection when a tab closes'. Types: fix, feat, perf, docs, refactor, test, chore. Lowercase after the colon, no full stop. See CONTRIBUTING.md, Commits."
+            exit 1
+          fi
+          echo "OK: $TITLE"

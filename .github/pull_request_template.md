@@ -1,4 +1,4 @@
-<!-- Title: one sentence saying what the change does, like a commit subject ("Fix …", "Show …"). It becomes the commit on main. -->
+<!-- Title: `<type>: <what the change does>`, e.g. "fix: keep the selection when a tab closes". Types: fix, feat, perf, docs, refactor, test, chore. It becomes the commit on main. -->
 
 **What this changes**
 
