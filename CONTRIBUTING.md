@@ -84,6 +84,7 @@ It doesn't measure key latency, drawing or launch time, which need a real displa
 - Write commit messages in English, as a short sentence saying what the change does: `Keep unreadable workspace state from being overwritten`.
 - Branch from `main` and open the pull request against `main`. Any branch name is fine.
 - Fill in the pull request template: what changed, why, and how you checked it.
+- CI runs two jobs on it: `test` (all the tests; it must pass before merging) and `performance` (see above; about ten minutes).
 - A maintainer reviews it. Expect questions about edge cases, and requests to make it smaller.
 - Maintainers squash or merge as fits. You don't need to tidy the history.
 
