@@ -1,0 +1,23 @@
+.github/pull_request_template.md
+  s_bf0ed424735551::t_da888f031eaca9 1
+.github/workflows/pr-title.yml
+  s_bf0ed424735551::t_2a6b59fc0917c6 1-29
+CONTRIBUTING.md
+  s_bf0ed424735551::t_c0fc1e8f7149cb 84,86,88-94,100,103,112-116,122,125-129,132,136,140
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "777dea5a377630712b04a6ac87bf2e208f3a8b90",
+  "prompts": {},
+  "sessions": {
+    "s_bf0ed424735551": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5ac29605-eee3-4cf1-9703-b5fa4086d055",
+        "model": "claude-fable-5-2"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    }
+  }
+}
