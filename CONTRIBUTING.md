@@ -71,6 +71,14 @@ PLUM_BENCH_DATA=/tmp/plum-bench-data swift test -c release -Xswiftc -enable-test
 
 Run it before and after your change, a few times each, and compare. How the published numbers were measured is in [`docs/benchmarks/`](docs/benchmarks/).
 
+Every pull request is also compared with `main` by CI (the `performance` job): parsing speed and memory per terminal, measured on the same machine in the same run, and it fails when either is worse by more than 10%. To run the same comparison yourself, with two checkouts that each have `Vendor/GhosttyVt.xcframework`:
+
+```sh
+python3 scripts/perf-compare.py <checkout of main> <checkout of your change>
+```
+
+It doesn't measure key latency, drawing or launch time, which need a real display. Those are measured by hand before releases.
+
 ## Commits and pull requests
 
 - Write commit messages in English, as a short sentence saying what the change does: `Keep unreadable workspace state from being overwritten`.

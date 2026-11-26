@@ -253,7 +253,7 @@ Sources/PlumKit/UI/            App (menus, notifications, quitting), MainWindow 
                                Sheets (dialog content), AppActions (actions that ask first), Controls, Theme
 Resources/                     app icon (made by scripts/make-icon.sh), en.lproj and ko.lproj UI strings
 Vendor/                        libghostty-vt xcframework (made by build-vt.sh, not in git)
-scripts/                       build-vt.sh, bundle.sh, release.sh, update-signing.swift (the update key and signatures); readme-bench.py draws the README's comparison chart (docs/assets/bench*.svg), readme-plum.py the README's plum (docs/assets/plum.svg) and a small one for the icon (icon/AsciiPlumFrames.swift); make-icon.sh makes the app icon from it
+scripts/                       build-vt.sh, bundle.sh, release.sh, perf-compare.py (two checkouts compared for speed and memory; CI runs it on pull requests), update-signing.swift (the update key and signatures); readme-bench.py draws the README's comparison chart (docs/assets/bench*.svg), readme-plum.py the README's plum (docs/assets/plum.svg) and a small one for the icon (icon/AsciiPlumFrames.swift); make-icon.sh makes the app icon from it
 ```
 
 Terminal emulation is [libghostty-vt](https://libghostty.tip.ghostty.org/) 1.0.1 (MIT); the renderer, fonts, input and pty are Plum's own. That is the only dependency.

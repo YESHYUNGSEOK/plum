@@ -4,6 +4,14 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      base:
+        description: Compare performance against this ref
+        default: main
+      head:
+        description: The ref to measure
+        default: main
 
 permissions:
   contents: read
@@ -40,3 +48,42 @@ jobs:
 
       - name: Test
         run: swift test
+
+  # Parsing speed and memory per terminal, compared with the base on the same
+  # machine in the same run (scripts/perf-compare.py). Fails when worse by
+  # more than 10%. Latency, drawing and launch time need a real display and
+  # are not measured here.
+  performance:
+    if: github.event_name != 'push'
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha || inputs.base }}
+          path: base
+          persist-credentials: false
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.head }}
+          path: head
+          persist-credentials: false
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: vt
+        with:
+          path: base/Vendor/GhosttyVt.xcframework
+          key: ghostty-vt-perf-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('base/scripts/build-vt.sh') }}
+
+      - name: Build libghostty-vt
+        if: steps.vt.outputs.cache-hit != 'true'
+        run: ./base/scripts/build-vt.sh
+
+      # Both sides use the base's library: a change to the library itself is measured by hand.
+      - name: Share libghostty-vt
+        run: cp -R base/Vendor/GhosttyVt.xcframework head/Vendor/
+
+      # The base's script judges, so a change can't loosen its own check.
+      - name: Compare
+        run: python3 base/scripts/perf-compare.py base head
