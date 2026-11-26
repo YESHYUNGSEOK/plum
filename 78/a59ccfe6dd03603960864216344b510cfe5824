@@ -1,0 +1,35 @@
+.github/ISSUE_TEMPLATE/bug_report.md
+  s_bf0ed424735551::t_618d6ad7d770ed 1-20
+.github/ISSUE_TEMPLATE/config.yml
+  s_bf0ed424735551::t_d33aac9708a94a 1-5
+.github/ISSUE_TEMPLATE/feature_request.md
+  s_bf0ed424735551::t_a71845206407c2 1-14
+.github/pull_request_template.md
+  s_bf0ed424735551::t_e8e29d0e6618e4 1-12
+.github/workflows/test.yml
+  s_bf0ed424735551::t_cec802afb47c45 1-42
+CONTRIBUTING.md
+  s_bf0ed424735551::t_f56d60f16a9acb 1-88
+README.ko.md
+  s_bf0ed424735551::t_fb2d0c960e2a8f 299,328-330
+README.md
+  s_bf0ed424735551::t_39b57d7ddeac7b 244,273-275
+SECURITY.md
+  s_bf0ed424735551::t_37c3636e022e9e 1-28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "78a59ccfe6dd03603960864216344b510cfe5824",
+  "prompts": {},
+  "sessions": {
+    "s_bf0ed424735551": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5ac29605-eee3-4cf1-9703-b5fa4086d055",
+        "model": "claude-fable-5-2"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    }
+  }
+}
