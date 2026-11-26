@@ -296,7 +296,7 @@ Plum은 터미널마다 `PLUM_SOCKET`, `PLUM_TAB_ID`, `PLUM_CLAUDE_SETTINGS` 환
 
 ## 아직 없는 것
 
-밝은 테마(만들었다가 뺐다), 한국어·영어 밖의 UI 언어, bash·fish의 프롬프트 표시, 서명·공증된 배포판(`release.sh`는 준비됨, Developer ID 인증서가 필요하다), Intel Mac 빌드. 이유와 순서는 설계 문서 14장에 있다.
+밝은 테마(만들었다가 뺐다), 한국어·영어 밖의 UI 언어, bash·fish의 프롬프트 표시, 서명·공증된 배포판(`release.sh`는 준비됨, Developer ID 인증서가 필요하다), Intel Mac 빌드. 이유와 순서는 [설계 문서](docs/superpowers/specs/2026-11-16-plum-design.md) 14장에 있다.
 
 ## 코드 구조
 
@@ -325,7 +325,9 @@ UI 문자열: 소스의 한국어가 키이고 영어는 `Resources/en.lproj/Loc
 
 - **버그와 아이디어**: 이슈로 남겨 주세요. 버그라면 무엇을 했고, 무엇을 기대했고, 실제로 어떻게 됐는지와 macOS 버전을 적어 주세요.
 - **풀 리퀘스트**: 작고 한 가지에 집중한 PR이 리뷰하기 쉽습니다. 먼저 `swift test`를 돌리고, 화면을 바꿨다면 위의 방법으로 띄워 확인해 주세요. 큰 변경은 이슈에서 방향을 먼저 맞추면 좋습니다.
-- **방향**: Plum이 무엇을 하려는지, 무엇을 일부러 넣지 않는지는 설계 문서 3·4장에 있습니다.
+- **준비, 변경 확인, 보내는 방법**: [`CONTRIBUTING.md`](CONTRIBUTING.md)(영어)에 있습니다.
+- **방향**: Plum이 무엇을 하려는지, 무엇을 일부러 넣지 않는지는 [설계 문서](docs/superpowers/specs/2026-11-16-plum-design.md) 3·4장에 있습니다.
+- **보안 문제**: 공개 이슈로 올리지 말고 [`SECURITY.md`](SECURITY.md)의 방법으로 알려 주세요.
 
 ## 라이선스
 

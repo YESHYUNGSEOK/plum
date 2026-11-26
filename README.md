@@ -241,7 +241,7 @@ Ahead of the latest Ghostty (1.4.0) on memory, key latency and output throughput
 
 ## Not there yet
 
-A light theme (built, then left out), UI languages other than English and Korean, prompt marks for bash and fish, signed and notarized releases (`release.sh` is ready; it needs a Developer ID certificate), an Intel build. Why, and in what order: chapter 14 of the design document.
+A light theme (built, then left out), UI languages other than English and Korean, prompt marks for bash and fish, signed and notarized releases (`release.sh` is ready; it needs a Developer ID certificate), an Intel build. Why, and in what order: chapter 14 of the [design document](docs/superpowers/specs/2026-11-16-plum-design.md).
 
 ## Code
 
@@ -270,7 +270,9 @@ Contributions are welcome: bug reports, ideas, documentation and code.
 
 - **Bugs and ideas**: open an issue. For a bug, say what you did, what you expected and what happened, and your macOS version.
 - **Pull requests**: small, focused ones are easiest to review. Run `swift test` first, and if you changed the UI, run the app and look. For a bigger change, open an issue first so we can agree on the direction.
-- **Direction**: what Plum is for, and what it deliberately leaves out, is in chapters 3 and 4 of the design document.
+- **How to set up, try a change and send it**: [`CONTRIBUTING.md`](CONTRIBUTING.md).
+- **Direction**: what Plum is for, and what it deliberately leaves out, is in chapters 3 and 4 of the [design document](docs/superpowers/specs/2026-11-16-plum-design.md).
+- **Security problems**: report them privately, as [`SECURITY.md`](SECURITY.md) says.
 
 ## License
 
