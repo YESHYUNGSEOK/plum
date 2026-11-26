@@ -17,7 +17,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: test-${{ github.ref }}
+  # A run started by hand stands alone; pushes and pull requests replace their own earlier run.
+  group: test-${{ github.event_name == 'workflow_dispatch' && github.run_id || format('{0}-{1}', github.event_name, github.ref) }}
   cancel-in-progress: true
 
 jobs:
