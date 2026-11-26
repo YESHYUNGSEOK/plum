@@ -1,0 +1,21 @@
+.github/workflows/test.yml
+  s_bf0ed424735551::t_168ae097eefff7 20-21
+scripts/perf-compare.py
+  s_bf0ed424735551::t_f0c45469374699 11-14,39-40,55,67-91,95
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "01105466e9767ec58c7889945bff21a8a2b880b6",
+  "prompts": {},
+  "sessions": {
+    "s_bf0ed424735551": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5ac29605-eee3-4cf1-9703-b5fa4086d055",
+        "model": "claude-fable-5-2"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    }
+  }
+}
