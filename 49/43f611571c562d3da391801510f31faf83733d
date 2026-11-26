@@ -1,0 +1,19 @@
+Sources/PlumKit/Model/DebugCommands.swift
+  s_46adcc9534cf3a::t_77b9402372072f 246-252
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4943f611571c562d3da391801510f31faf83733d",
+  "prompts": {},
+  "sessions": {
+    "s_46adcc9534cf3a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_46adcc9534cf3a",
+        "model": "unknown"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    }
+  }
+}
