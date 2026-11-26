@@ -243,9 +243,13 @@ extension AppModel {
             guard cells.count >= 4, let window = debugWindow?(), let terminal = debugTerminalView?() else { return "bad arguments" }
             let pressFlags = NSEvent.ModifierFlags(rawValue: cells.count > 4 ? UInt(cells[4]) : 0)
             let from = terminal.windowPoint(column: cells[0], row: cells[1]), to = terminal.windowPoint(column: cells[2], row: cells[3])
-            let steps: [(NSEvent.EventType, NSPoint)] = [(.leftMouseDown, from)]
-                + (1...4).map { (.leftMouseDragged, NSPoint(x: from.x + (to.x - from.x) * Double($0) / 4, y: from.y + (to.y - from.y) * Double($0) / 4)) }
-                + [(.leftMouseUp, to)]
+            // Built step by step: as one expression, older compilers give up type-checking it.
+            var steps: [(NSEvent.EventType, NSPoint)] = [(.leftMouseDown, from)]
+            for step in 1...4 {
+                let part = CGFloat(step) / 4
+                steps.append((.leftMouseDragged, NSPoint(x: from.x + (to.x - from.x) * part, y: from.y + (to.y - from.y) * part)))
+            }
+            steps.append((.leftMouseUp, to))
             for (type, point) in steps {
                 guard let event = NSEvent.mouseEvent(
                     with: type, location: point, modifierFlags: type == .leftMouseDown ? pressFlags : [],
