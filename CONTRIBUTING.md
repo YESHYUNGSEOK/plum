@@ -79,14 +79,68 @@ python3 scripts/perf-compare.py <checkout of main> <checkout of your change>
 
 It doesn't measure key latency, drawing or launch time, which need a real display. Those are measured by hand before releases.
 
-## Commits and pull requests
+## Branches
 
-- Write commit messages in English, as a short sentence saying what the change does: `Keep unreadable workspace state from being overwritten`.
-- Branch from `main` and open the pull request against `main`. Any branch name is fine.
-- Fill in the pull request template: what changed, why, and how you checked it.
-- CI runs two jobs on it: `test` (all the tests; it must pass before merging) and `performance` (see above; about ten minutes).
-- A maintainer reviews it. Expect questions about edge cases, and requests to make it smaller.
-- Maintainers squash or merge as fits. You don't need to tidy the history.
+Branch from `main`, one branch per change, named `<type>/<what-it-does>` in lowercase English with hyphens. The types are the same as for commits:
+
+| Type | For | Branch example |
+|---|---|---|
+| `fix` | a bug | `fix/codex-usage-after-account-switch` |
+| `feat` | something Plum couldn't do before | `feat/fish-prompt-marks` |
+| `perf` | speed or memory, with nothing else changed | `perf/glyph-atlas-reuse` |
+| `docs` | documentation only | `docs/conventions` |
+| `refactor` | the same behaviour, written differently | `refactor/split-app-model` |
+| `test` | tests only | `test/archive-with-ignored-files` |
+| `chore` | CI, build scripts, tidying | `chore/ci-cache-key` |
+
+From a fork the name matters less, but the same form helps whoever reads the pull request list.
+
+## Commits
+
+Commit subjects follow [Conventional Commits](https://www.conventionalcommits.org): `<type>: <what the change does>`, with a type from the table above.
+
+```
+fix: keep unreadable workspace state from being overwritten
+
+A state file that couldn't be decoded was replaced with an empty one at
+launch, losing every project and workspace. Startup now stops and says
+which file it couldn't read.
+
+Fixes #12
+```
+
+- **Subject**: the type, a colon and a space, then one English sentence saying what the change does. Start it with a lowercase verb (`add`, `keep`, `show`, `drop`), no full stop, 72 characters at most in all.
+- **Say the behaviour, not the files.** `feat: show the model under each agent tab`, not `feat: update Sidebar.swift`.
+- **Pick the type by what a user would notice.** Something new is `feat`; something that was wrong is `fix`; faster or smaller and nothing else is `perf`. If nobody using Plum could tell, it is `refactor`, `test`, `docs` or `chore`.
+- **A scope is optional**, for when it helps to say where: `fix(terminal): …`, `feat(sidebar): …`.
+- **A breaking change** (a setting or a saved file an older Plum can't read, a removed feature) has `!` before the colon, `feat!: …`, and a `BREAKING CHANGE:` line in the body saying what to do about it.
+- **Body**, after a blank line and wrapped at 72 characters: why the change was needed and what was wrong before. Leave it out when the subject says it all.
+- **Issues**: `Fixes #12` or `Refs #12` on a line of its own at the end.
+- **One change per commit.** A commit that needs "and" in its subject is usually two.
+- **Co-authors**, human or AI assistant, go in `Co-authored-by:` trailers. Whoever opens the pull request answers for all of it.
+
+More examples:
+
+```
+feat: show each agent tab's model and effort in the sidebar
+fix(terminal): drop saved tabs whose terminals have ended
+perf: reuse the glyph atlas across tabs
+docs: say which CI jobs run on a pull request
+chore: cache libghostty-vt between CI runs
+```
+
+Pull requests are merged by squashing, so only the pull request's title has to follow this: the commits on your branch can be whatever helps you work. Commits before this convention (2026-11-26) are plain sentences without a type. `release: 0.1.21` commits are made by maintainers only.
+
+## Pull requests
+
+- **Title**: written like a commit subject (above): `fix: …`, `feat: …`. It becomes the commit on `main`, and CI checks its form (the `title` job).
+- **Description**: fill in the template: what changed, why, and how you checked it. It becomes the commit's body, so write it for someone reading the history a year from now.
+- **One change per pull request**, against `main`. A fix and an unrelated tidy-up are two pull requests. Smaller ones are reviewed sooner; past a few hundred changed lines, consider splitting.
+- **Drafts are welcome.** Open a draft to ask about a direction before finishing; mark it ready when `swift test` passes and you have tried it.
+- **CI** runs three jobs: `title` (the form above), `test` (all the tests) and `performance` (see above; about ten minutes). `title` and `test` must pass before merging. If `performance` fails on a change that can't affect speed, say so in the pull request: shared CI machines are noisy, and a maintainer will run it again.
+- **Review**: a maintainer reviews it. Expect questions about edge cases, and requests to make it smaller.
+- **After review starts**, add commits instead of force-pushing, so the reviewer can see what changed since. Bring in `main` by merging or rebasing, whichever you prefer.
+- **Merging**: a maintainer squashes it into one commit on `main`, and the branch is deleted.
 
 ## Releases
 
