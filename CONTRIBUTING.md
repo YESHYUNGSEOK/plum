@@ -79,14 +79,62 @@ python3 scripts/perf-compare.py <checkout of main> <checkout of your change>
 
 It doesn't measure key latency, drawing or launch time, which need a real display. Those are measured by hand before releases.
 
-## Commits and pull requests
+## Branches
 
-- Write commit messages in English, as a short sentence saying what the change does: `Keep unreadable workspace state from being overwritten`.
-- Branch from `main` and open the pull request against `main`. Any branch name is fine.
-- Fill in the pull request template: what changed, why, and how you checked it.
-- CI runs two jobs on it: `test` (all the tests; it must pass before merging) and `performance` (see above; about ten minutes).
-- A maintainer reviews it. Expect questions about edge cases, and requests to make it smaller.
-- Maintainers squash or merge as fits. You don't need to tidy the history.
+Branch from `main`, one branch per change, named `<kind>/<what-it-does>` in lowercase English with hyphens:
+
+| Kind | For | Example |
+|---|---|---|
+| `fix/` | a bug | `fix/codex-usage-after-account-switch` |
+| `feature/` | something Plum couldn't do before | `feature/fish-prompt-marks` |
+| `perf/` | speed or memory, with nothing else changed | `perf/glyph-atlas-reuse` |
+| `docs/` | documentation only | `docs/conventions` |
+| `chore/` | CI, build scripts, tests only, tidying | `chore/ci-cache-key` |
+
+From a fork the name matters less, but the same form helps whoever reads the pull request list.
+
+## Commits
+
+Pull requests are merged by squashing, so the commits on your branch don't have to be tidy: only the pull request's title and description reach `main`. If you do want them tidy, or you are a maintainer committing to `main`, this is the form:
+
+```
+Keep unreadable workspace state from being overwritten
+
+A state file that couldn't be decoded was replaced with an empty one at
+launch, losing every project and workspace. Startup now stops and says
+which file it couldn't read.
+
+Fixes #12
+```
+
+- **Subject**: one English sentence saying what the change does, starting with a capital verb (`Add`, `Fix`, `Keep`, `Show`, `Drop`), no full stop, 72 characters at most.
+- **Say the behaviour, not the files.** `Show the model under each agent tab`, not `Update Sidebar.swift`.
+- **No type prefix.** The verb already says it: `Fix …`, not `fix: …` or `[fix] …`.
+- **Body**, after a blank line and wrapped at 72 characters: why the change was needed and what was wrong before. Leave it out when the subject says it all.
+- **Issues**: `Fixes #12` or `Refs #12` on a line of its own at the end.
+- **One change per commit.** A commit that needs "and" in its subject is usually two.
+- **Co-authors**, human or AI assistant, go in `Co-authored-by:` trailers. Whoever opens the pull request answers for all of it.
+
+Subjects from this repository's history, as examples:
+
+```
+Hook reports outrank the terminal's own state signal
+Limit decoded project icon dimensions
+Prevent concurrent Plum instances from overwriting state
+```
+
+`0.1.20: …` subjects are release commits, which only maintainers make.
+
+## Pull requests
+
+- **Title**: written like a commit subject (above). It becomes the commit on `main`.
+- **Description**: fill in the template: what changed, why, and how you checked it. It becomes the commit's body, so write it for someone reading the history a year from now.
+- **One change per pull request**, against `main`. A fix and an unrelated tidy-up are two pull requests. Smaller ones are reviewed sooner; past a few hundred changed lines, consider splitting.
+- **Drafts are welcome.** Open a draft to ask about a direction before finishing; mark it ready when `swift test` passes and you have tried it.
+- **CI** runs two jobs: `test` (all the tests; it must pass before merging) and `performance` (see above; about ten minutes). If `performance` fails on a change that can't affect speed, say so in the pull request: shared CI machines are noisy, and a maintainer will run it again.
+- **Review**: a maintainer reviews it. Expect questions about edge cases, and requests to make it smaller.
+- **After review starts**, add commits instead of force-pushing, so the reviewer can see what changed since. Bring in `main` by merging or rebasing, whichever you prefer.
+- **Merging**: a maintainer squashes it into one commit on `main`, and the branch is deleted.
 
 ## Releases
 

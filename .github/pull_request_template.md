@@ -1,3 +1,5 @@
+<!-- Title: one sentence saying what the change does, like a commit subject ("Fix …", "Show …"). It becomes the commit on main. -->
+
 **What this changes**
 
 **Why**
