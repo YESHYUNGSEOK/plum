@@ -1,0 +1,25 @@
+.github/workflows/test.yml
+  s_bf0ed424735551::t_8bbc1eb82b1e30 7-14,51-89
+CONTRIBUTING.md
+  s_bf0ed424735551::t_436f027e174760 74-81
+README.md
+  s_bf0ed424735551::t_567818da77c9fe 256
+scripts/perf-compare.py
+  s_bf0ed424735551::t_ba71f8c0d92513 1-94
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8567bb55ff8020c0fe61723207c201387acbe187",
+  "prompts": {},
+  "sessions": {
+    "s_bf0ed424735551": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5ac29605-eee3-4cf1-9703-b5fa4086d055",
+        "model": "claude-fable-5-2"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    }
+  }
+}
