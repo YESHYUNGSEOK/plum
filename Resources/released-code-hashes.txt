@@ -2,3 +2,4 @@
 # per line, oldest first: the app attaches to the terminal hosts these
 # started (HostIdentity). release.sh appends each release's line; commit it
 # with the release. Never remove a line while that release may still run.
+543788efcacef4f866a8586f10ad80e5322db731 0.1.21
