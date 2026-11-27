@@ -53,6 +53,7 @@ The [Code](README.md#code) section of the README maps the folders. In short:
 - **Looked at.** If you changed anything on screen, run the app and look at it, and add a screenshot to the pull request.
 - **No new dependencies.** libghostty-vt is the only one, on purpose. If you think another is needed, raise it in an issue first.
 - **Comments say why.** The code already says what it does. Match the style of the file you are in.
+- **The terminal host protocol only grows.** A new version attaches to the terminal hosts of the releases before it (`TerminalHost.oldestCompatibleVersion`), so change the host's requests only by adding to them, and never raise that constant: an update would end every terminal in the older hosts.
 - **Careful where it can lose work.** Deleting worktrees, overwriting the state file, and anything that reads external input (hook messages, session files, downloads) are checked strictly in review.
 
 ### UI text

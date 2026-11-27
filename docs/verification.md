@@ -52,6 +52,14 @@ Checked on 2026-11-16 on a MacBook Pro (M4 Pro, macOS 26.3.1).
 - Quitting and relaunching the test app: while it was closed, the host (its parent now launchd), a stand-in Claude and `python3 -m http.server` kept running, and the server answered (200). After relaunching, each workspace's tab count, order and open tab, the screen content, a tab title given by hand ("web server"), the Claude conversation title, ports and the last selection were all as before, and the "Waiting for input" a hook sent while it was closed showed in the sidebar and under "Needs attention". When every terminal had ended, the host quit by itself and removed its socket.
 - Cost: with 7 tabs attached the host used 4 MB of memory and 0% CPU. While the app is attached the host doesn't parse output; it only passes it on (it parses only after the app quits). Heavy output (50 MB of text, release build, median of 6 runs): a direct pty 183 MB/s, through the host 152 MB/s (0.83x). Each 1 KB the pty hands over adds a socket write and read. Handing the pty to the app directly would be faster, but output arriving the moment the app quits could be lost, so it wasn't chosen.
 
+**Checked by running it, 2026-11-27: an update keeps running terminals**
+
+- Two copies of the app built from the same source as two releases would be (CFBundleVersion 100 and 101, so different cdhashes), each signed with a test certificate made like the release one, the second listing the first's cdhash; and a third signed ad-hoc. All under a bundle ID of their own and a state folder of their own.
+- The first opened a tab, which started its host and a shell. Quit; the host and shell kept running. Its bundle was deleted and the second put at the same path, as Homebrew does. The second attached: two connections from it to the first's host (control and the tab's terminal), one to a host of its own, the same shell pid, no new shell, the saved tab kept.
+- The third, put there instead, was refused: no connection to the first's host, the saved tab kept (that host still runs), the shell untouched. It opened a tab of its own in its own host.
+- `codesign -R` with the first copy's designated requirement: the second satisfies it, the third doesn't. A process that swaps its executable for a copy of the host's is still refused (automated test).
+- Not checked: typing in the attached tab and seeing its screen (no screen capture from this shell; the attach itself only succeeds after the host's check), the in-app installer's check against a real release (it needs a release signed with the release certificate).
+
 **Not checked: needs checking by actually using it**
 
 - **Quitting and relaunching with a real Claude or Codex running**: checked with stand-in processes and hook commands.

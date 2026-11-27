@@ -18,6 +18,11 @@ cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 # UI text: Korean is the source language, English is translated. Other
 # languages fall back to English (the development region below).
 cp -R Resources/en.lproj Resources/ko.lproj "$APP/Contents/Resources/"
+# The releases whose terminal hosts this build attaches to (HostIdentity).
+cp Resources/released-code-hashes.txt "$APP/Contents/Resources/"
+# The oldest terminal host it still speaks to, for the update check of the build before it.
+OLDEST_HOST="$(sed -n 's/.*static let oldestCompatibleVersion = \([0-9][0-9]*\).*/\1/p' Sources/PlumKit/Terminal/TerminalHost.swift)"
+[ -n "$OLDEST_HOST" ] || { echo "oldestCompatibleVersion not found in TerminalHost.swift" >&2; exit 1; }
 
 # Precompile the shader so the app doesn't run the Metal compiler at launch.
 if xcrun -sdk macosx -f metal >/dev/null 2>&1; then
@@ -51,9 +56,11 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>NSHighResolutionCapable</key><true/>
     <key>NSPrincipalClass</key><string>NSApplication</string>
     <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
+    <key>PlumOldestHostVersion</key><integer>OLDEST_HOST</integer>
 </dict>
 </plist>
 PLIST
+sed -i '' "s/OLDEST_HOST/$OLDEST_HOST/" "$APP/Contents/Info.plist"
 
 codesign --force --options runtime --sign - "$APP" 2>/dev/null
 echo "OK: $APP ($(du -sh "$APP" | cut -f1))"

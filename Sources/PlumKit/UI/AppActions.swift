@@ -204,16 +204,15 @@ enum AppActions {
         model.notice = String(localized: "업데이트를 내려받는 중…")
         do {
             let archive = try await Updates.fetch(release)
-            guard !model.hasTerminalsUpdateCannotRestore else {
-                model.notice = nil
-                model.availableUpdate = release
-                model.errorMessage = String(localized: "실행 중인 터미널을 새 버전에서 이어받을 수 없어 업데이트를 보류했습니다. 해당 터미널을 닫은 뒤 다시 설치해 주세요.")
-                return
-            }
-            let app = try Updates.install(archive.zip, signature: archive.signature, version: release.version)
+            let app = try Updates.install(archive.zip, signature: archive.signature, version: release.version,
+                                          keeps: { !model.losesTerminals(updatingTo: $0) })
             // Still true if the quit is cancelled.
             model.notice = String(localized: "업데이트를 설치했습니다. Plum을 다시 시작하면 적용됩니다.")
             relaunch(app)
+        } catch Updates.InstallError.wouldEndTerminals {
+            model.notice = nil
+            model.availableUpdate = release
+            model.errorMessage = Updates.InstallError.wouldEndTerminals.localizedDescription
         } catch {
             model.notice = nil
             model.errorMessage = String(localized: "업데이트를 설치하지 못했습니다: \(error.localizedDescription)")

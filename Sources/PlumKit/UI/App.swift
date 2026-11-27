@@ -105,9 +105,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         model.debugTraceDialogClose = { [weak self] done in self?.windowController.traceDialogClose(done) }
         model.debugNotificationStatus = { [weak self] in self?.notificationLog.joined(separator: "; ") ?? "" }
         model.debugInstallUpdate = { zip, signature, version in
-            guard !self.model.hasTerminalsUpdateCannotRestore else { return "failed: terminals still running" }
             do {
-                let app = try Updates.install(try Data(contentsOf: zip), signature: try Data(contentsOf: signature), version: version)
+                let app = try Updates.install(try Data(contentsOf: zip), signature: try Data(contentsOf: signature), version: version,
+                                              keeps: { !self.model.losesTerminals(updatingTo: $0) })
                 DispatchQueue.main.async { AppActions.relaunch(app) }
                 return "installed " + app.path
             } catch {

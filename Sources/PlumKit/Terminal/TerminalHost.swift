@@ -6,6 +6,8 @@ import Security
 @_silgen_name("csops_audittoken")
 private func csopsAuditToken(_ pid: pid_t, _ ops: UInt32, _ data: UnsafeMutableRawPointer,
                              _ size: Int, _ token: UnsafeMutablePointer<audit_token_t>) -> Int32
+@_silgen_name("csops")
+private func csops(_ pid: pid_t, _ ops: UInt32, _ data: UnsafeMutableRawPointer, _ size: Int) -> Int32
 
 /// The process that keeps terminals alive while Plum isn't running.
 ///
@@ -25,9 +27,15 @@ private func csopsAuditToken(_ pid: pid_t, _ ops: UInt32, _ data: UnsafeMutableR
 /// host, input to it. Every other request is answered with one JSON line,
 /// and more requests may follow on the same connection.
 public final class TerminalHost {
-    /// Bumped whenever the protocol or what the host does changes: a host
-    /// started by an older Plum keeps its own socket and its own terminals.
-    public static let version = 5
+    /// Bumped whenever the protocol or what the host does changes. Each
+    /// build starts a host of its own for its new terminals; the hosts of
+    /// earlier releases keep theirs, and the app attaches to them too.
+    public static let version = 6
+    /// The oldest host this app still attaches to. Raising it loses the
+    /// terminals of every host older than it at the next update, so don't:
+    /// change the protocol only by adding to it. The update check reads it
+    /// from the new app's Info.plist (`PlumOldestHostVersion`, bundle.sh).
+    public static let oldestCompatibleVersion = 6
 
     private let socketPath: String
     private let lock = NSLock()
@@ -43,7 +51,22 @@ public final class TerminalHost {
     /// folder (a socket path must stay under 104 bytes), named after the
     /// store so a test instance never reaches the user's terminals.
     public static func socketPath(for store: Store) -> String {
-        socketPath(for: store, version: version, codeHash: ownCodeHash())
+        socketPath(for: store, version: version, codeHash: HostIdentity.ownHash)
+    }
+
+    /// The sockets of other builds' hosts of this store that this app can
+    /// attach to: version `oldestCompatibleVersion` or later. Whether one
+    /// may be trusted is checked when connecting.
+    public static func earlierHostSockets(for store: Store) -> [String] {
+        let folder = NSTemporaryDirectory(), own = socketPath(for: store)
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: folder)) ?? []
+        return names.compactMap { name in
+            let parts = name.split(separator: "-")
+            guard name.hasPrefix("plum-host-"), name.hasSuffix(".sock"), parts.count == 5, parts[3] == Substring(storeHash(store)),
+                  let version = Int(parts[2]), (oldestCompatibleVersion...self.version).contains(version),
+                  folder + name != own else { return nil }
+            return folder + name
+        }.sorted()
     }
 
     public static func legacySocketPath(for store: Store) -> String {
@@ -88,7 +111,8 @@ public final class TerminalHost {
 
     /// Runs the host until it has had no terminals for a minute.
     public static func run(socketPath: String) -> Never {
-        guard sameCode(as: getppid()) else { exit(1) }
+        HostIdentity.prepare()
+        guard HostIdentity.acceptsParent(getppid()) else { exit(1) }
         signal(SIGPIPE, SIG_IGN) // a vanished app is noticed by its writes failing
         signal(SIGHUP, SIG_IGN)
         let host = TerminalHost(socketPath: socketPath)
@@ -192,7 +216,7 @@ public final class TerminalHost {
             }
             // Only Plum's GUI may control shells; agent hooks send plain status lines.
             if !authenticated {
-                guard Self.isPlumProcess(connection.fd) else { return connection.close() }
+                guard HostIdentity.acceptsClient(connection.fd) else { return connection.close() }
                 authenticated = true
                 lock.lock()
                 connectedClients += 1
@@ -242,55 +266,20 @@ public final class TerminalHost {
         connection.close()
     }
 
-    fileprivate static func isPlumProcess(_ fd: Int32, legacy: (hash: String, pid: pid_t, version: UInt32)? = nil) -> Bool {
-        if let legacy {
-            var token = audit_token_t()
-            var size = socklen_t(MemoryLayout<audit_token_t>.size)
-            guard getsockopt(fd, SOL_LOCAL, LOCAL_PEERTOKEN, &token, &size) == 0,
-                  size == MemoryLayout<audit_token_t>.size,
-                  pid_t(bitPattern: token.val.5) == legacy.pid,
-                  token.val.7 == legacy.version else { return false }
-            var hash = [UInt8](repeating: 0, count: 20)
-            let result = hash.withUnsafeMutableBytes {
-                csopsAuditToken(pid_t(bitPattern: token.val.5), 5, $0.baseAddress!, $0.count, &token)
-            }
-            return result == 0 && hash.map { String(format: "%02x", $0) }.joined() == legacy.hash
+    /// The one pinned host from before version 6 (see AppModel.start): the
+    /// exact process, and the exact code it was started with.
+    fileprivate static func isLegacyHost(_ fd: Int32, _ legacy: (hash: String, pid: pid_t, version: UInt32)) -> Bool {
+        var token = audit_token_t()
+        var size = socklen_t(MemoryLayout<audit_token_t>.size)
+        guard getsockopt(fd, SOL_LOCAL, LOCAL_PEERTOKEN, &token, &size) == 0,
+              size == MemoryLayout<audit_token_t>.size,
+              pid_t(bitPattern: token.val.5) == legacy.pid,
+              token.val.7 == legacy.version else { return false }
+        var hash = [UInt8](repeating: 0, count: 20)
+        let result = hash.withUnsafeMutableBytes {
+            csopsAuditToken(pid_t(bitPattern: token.val.5), 5, $0.baseAddress!, $0.count, &token)
         }
-        var peer: pid_t = 0
-        var size = socklen_t(MemoryLayout<pid_t>.size)
-        guard getsockopt(fd, SOL_LOCAL, LOCAL_PEERPID, &peer, &size) == 0,
-              size == MemoryLayout<pid_t>.size else { return false }
-        return sameCode(as: peer)
-    }
-
-    private static func sameCode(as pid: pid_t) -> Bool {
-        guard let hash = ownCodeHash(), matchesCode(as: getpid(), hash: hash) else { return false }
-        return matchesCode(as: pid, hash: hash)
-    }
-
-    static func ownCodeHash() -> String? {
-        let flags = SecCSFlags(rawValue: 0)
-        var owner: SecCode?
-        var staticOwner: SecStaticCode?
-        var information: CFDictionary?
-        guard SecCodeCopySelf(flags, &owner) == errSecSuccess, let owner,
-              SecCodeCopyStaticCode(owner, flags, &staticOwner) == errSecSuccess, let staticOwner,
-              SecCodeCopySigningInformation(staticOwner, flags, &information) == errSecSuccess,
-              let details = information as? [String: Any],
-              let identity = details[kSecCodeInfoUnique as String] as? Data else { return nil }
-        return identity.map { String(format: "%02x", $0) }.joined()
-    }
-
-    private static func matchesCode(as pid: pid_t, hash: String) -> Bool {
-        let flags = SecCSFlags(rawValue: 0)
-        var requirement: SecRequirement?
-        guard SecRequirementCreateWithString("cdhash H\"\(hash)\"" as CFString, flags, &requirement) == errSecSuccess,
-              let requirement else { return false }
-        let attributes = [kSecGuestAttributePid as String: NSNumber(value: pid)] as CFDictionary
-        var peer: SecCode?
-        guard SecCodeCopyGuestWithAttributes(nil, attributes, flags, &peer) == errSecSuccess,
-              let peer else { return false }
-        return SecCodeCheckValidity(peer, flags, requirement) == errSecSuccess
+        return result == 0 && hash.map { String(format: "%02x", $0) }.joined() == legacy.hash
     }
 
     private func session(_ id: String) -> HostSession? {
@@ -652,6 +641,131 @@ private extension [String: Any] {
     }
 }
 
+// MARK: - Who may talk to whom
+
+/// Which processes may drive a terminal host, and which hosts the app may
+/// hand its terminals to.
+///
+/// - A host takes a client running its own code, or a newer release signed
+///   as it is: Plum's identifier and Plum's release certificate. A build
+///   signed ad-hoc (`bundle.sh`, a contributor's) has no certificate, so
+///   its host takes only that exact build.
+/// - The app trusts a host running its own code, or one of the releases
+///   before it, listed by cdhash in its bundle (`released-code-hashes.txt`,
+///   appended to by `release.sh`).
+///
+/// Both are read from what the kernel holds for the running process, not
+/// from its files: an update replaces those, and a host started by the
+/// release before keeps running the code it was started with. Only the
+/// newer side's files are read, and they are the ones still on disk.
+enum HostIdentity {
+    /// This process's code, read once and early: an update may replace the
+    /// files on disk while it runs.
+    static let ownHash: String? = {
+        var code: SecCode?, staticCode: SecStaticCode?, information: CFDictionary?
+        guard SecCodeCopySelf([], &code) == errSecSuccess, let code,
+              SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode,
+              SecCodeCopySigningInformation(staticCode, [], &information) == errSecSuccess,
+              let identity = (information as? [String: Any])?[kSecCodeInfoUnique as String] as? Data else { return nil }
+        return hex(identity)
+    }()
+
+    /// What another build must satisfy to drive this one's host: this code's
+    /// designated requirement. For a release, Plum's identifier and release
+    /// certificate; for a build signed ad-hoc, its own cdhash.
+    static let ownRequirement: SecRequirement? = {
+        var code: SecCode?, staticCode: SecStaticCode?, requirement: SecRequirement?
+        guard SecCodeCopySelf([], &code) == errSecSuccess, let code,
+              SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode,
+              SecCodeCopyDesignatedRequirement(staticCode, [], &requirement) == errSecSuccess else { return nil }
+        return requirement
+    }()
+
+    /// The releases before this one: their hosts may hold terminals this app takes over.
+    static let releasedHashes: Set<String> = releasedHashes(in: Bundle.main.bundleURL)
+
+    /// Reads all of the above now, before anything can replace the files they come from.
+    static func prepare() {
+        _ = ownHash
+        _ = ownRequirement
+        _ = releasedHashes
+    }
+
+    static func releasedHashes(in app: URL) -> Set<String> {
+        let file = app.appendingPathComponent("Contents/Resources/released-code-hashes.txt")
+        return parse((try? String(contentsOf: file, encoding: .utf8)) ?? "")
+    }
+
+    /// One release per line: its cdhash (40 hex digits), then anything (its version). `#` starts a comment.
+    static func parse(_ text: String) -> Set<String> {
+        Set(text.split(whereSeparator: \.isNewline).compactMap { line in
+            let hash = line.split(separator: " ").first.map { $0.lowercased() } ?? ""
+            return hash.count == 40 && hash.allSatisfy(\.isHexDigit) ? hash : nil
+        })
+    }
+
+    /// A host on the other end of `fd` the app may use, and its cdhash.
+    static func trustedHost(_ fd: Int32) -> String? {
+        guard let peer = peer(fd), peer.hash == ownHash || releasedHashes.contains(peer.hash) else { return nil }
+        return peer.hash
+    }
+
+    /// Whether the client on the other end of `fd` may drive this host.
+    static func acceptsClient(_ fd: Int32) -> Bool {
+        guard var peer = peer(fd) else { return false }
+        if peer.hash == ownHash { return true }
+        let audit = withUnsafeBytes(of: &peer.token) { Data($0) }
+        return satisfiesOwnRequirement([kSecGuestAttributeAudit as String: audit])
+    }
+
+    /// Whether the app that started this host may: the host runs only for Plum.
+    static func acceptsParent(_ pid: pid_t) -> Bool {
+        var status: UInt32 = 0, hash = [UInt8](repeating: 0, count: 20)
+        guard csops(pid, 0, &status, MemoryLayout<UInt32>.size) == 0, status & 0x1 != 0, // CS_OPS_STATUS: CS_VALID
+              hash.withUnsafeMutableBytes({ csops(pid, 5, $0.baseAddress!, $0.count) }) == 0 else { return false }
+        return hex(Data(hash)) == ownHash || satisfiesOwnRequirement([kSecGuestAttributePid as String: NSNumber(value: pid)])
+    }
+
+    /// Whether the hosts in use will take `app` (a newer release, unpacked
+    /// but not installed yet) and be trusted by it: it is signed as this
+    /// app is, lists every host's code among its earlier releases, and still
+    /// speaks every host's version.
+    static func keepsTerminals(updatingTo app: URL, hosts: [(hash: String, version: Int)]) -> Bool {
+        guard !hosts.isEmpty else { return true }
+        var code: SecStaticCode?
+        guard let ownRequirement, SecStaticCodeCreateWithPath(app as CFURL, [], &code) == errSecSuccess, let code,
+              SecStaticCodeCheckValidity(code, [], ownRequirement) == errSecSuccess else { return false }
+        let info = NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist"))
+        return keeps(hosts, trusted: releasedHashes(in: app), oldestVersion: info?["PlumOldestHostVersion"] as? Int)
+    }
+
+    static func keeps(_ hosts: [(hash: String, version: Int)], trusted: Set<String>, oldestVersion: Int?) -> Bool {
+        hosts.allSatisfy { host in trusted.contains(host.hash) && oldestVersion.map { host.version >= $0 } == true }
+    }
+
+    private static func satisfiesOwnRequirement(_ attributes: [String: Any]) -> Bool {
+        var code: SecCode?
+        guard let ownRequirement, SecCodeCopyGuestWithAttributes(nil, attributes as CFDictionary, [], &code) == errSecSuccess,
+              let code else { return false }
+        return SecCodeCheckValidity(code, [], ownRequirement) == errSecSuccess
+    }
+
+    /// The process on the other end of `fd`, as the kernel holds it: its
+    /// audit token, and its cdhash if its code is still valid.
+    private static func peer(_ fd: Int32) -> (token: audit_token_t, hash: String)? {
+        var token = audit_token_t()
+        var size = socklen_t(MemoryLayout<audit_token_t>.size)
+        guard getsockopt(fd, SOL_LOCAL, LOCAL_PEERTOKEN, &token, &size) == 0, size == MemoryLayout<audit_token_t>.size else { return nil }
+        let pid = pid_t(bitPattern: token.val.5)
+        var status: UInt32 = 0, hash = [UInt8](repeating: 0, count: 20)
+        guard csopsAuditToken(pid, 0, &status, MemoryLayout<UInt32>.size, &token) == 0, status & 0x1 != 0,
+              hash.withUnsafeMutableBytes({ csopsAuditToken(pid, 5, $0.baseAddress!, $0.count, &token) }) == 0 else { return nil }
+        return (token, hex(Data(hash)))
+    }
+
+    private static func hex(_ data: Data) -> String { data.map { String(format: "%02x", $0) }.joined() }
+}
+
 // MARK: - The app's side
 
 /// The app's way to the terminal host: starts it when it isn't running,
@@ -665,8 +779,11 @@ public final class TerminalHostClient: @unchecked Sendable {
     }
 
     public let socketPath: String
-    private let expectedVersion: Int
+    private let acceptedVersions: ClosedRange<Int>
     private let trustedLegacy: (hash: String, pid: pid_t, version: UInt32)?
+    /// What the host said it is, and its code, once connected.
+    public private(set) var version = 0
+    public private(set) var codeHash: String?
     /// One connection for requests; terminals get connections of their own.
     private var control: Connection?
     private var rejectedHost = false
@@ -676,7 +793,7 @@ public final class TerminalHostClient: @unchecked Sendable {
     /// if none is listening. Nil if it can't be reached.
     public init?(socketPath: String, executable: String) {
         self.socketPath = socketPath
-        expectedVersion = TerminalHost.version
+        acceptedVersions = TerminalHost.version...TerminalHost.version
         trustedLegacy = nil
         if hello() { return }
         if rejectedHost { return nil }
@@ -692,14 +809,27 @@ public final class TerminalHostClient: @unchecked Sendable {
     /// Only reconnects to the known legacy host; never launches one.
     public init?(legacySocketPath: String, codeHash: String, pid: pid_t, pidVersion: UInt32) {
         socketPath = legacySocketPath
-        expectedVersion = 1
+        acceptedVersions = 1...1
         trustedLegacy = (codeHash, pid, pidVersion)
         guard hello() else { return nil }
     }
 
+    /// Connects to the host of an earlier release (`earlierHostSockets`)
+    /// for the terminals it keeps; never launches one.
+    public init?(earlierSocketPath: String) {
+        socketPath = earlierSocketPath
+        acceptedVersions = TerminalHost.oldestCompatibleVersion...TerminalHost.version
+        trustedLegacy = nil
+        guard hello() else { return nil }
+    }
+
+    deinit { control?.close() }
+
     private func hello() -> Bool {
-        guard let reply = request(["op": "hello"]) else { return false }
-        return reply["version"] as? Int == expectedVersion
+        guard let reply = request(["op": "hello"]), let version = reply["version"] as? Int,
+              acceptedVersions.contains(version) else { return false }
+        self.version = version
+        return true
     }
 
     /// Starts the host in a session of its own, so it outlives the app and
@@ -749,7 +879,16 @@ public final class TerminalHostClient: @unchecked Sendable {
                   error == 0 else { Darwin.close(fd); return nil }
         }
         guard fcntl(fd, F_SETFL, originalFlags) >= 0 else { Darwin.close(fd); return nil }
-        guard TerminalHost.isPlumProcess(fd, legacy: trustedLegacy) else {
+        let trusted: Bool
+        if let trustedLegacy {
+            trusted = TerminalHost.isLegacyHost(fd, trustedLegacy)
+            if trusted { codeHash = trustedLegacy.hash }
+        } else if let hash = HostIdentity.trustedHost(fd) {
+            (trusted, codeHash) = (true, hash)
+        } else {
+            trusted = false
+        }
+        guard trusted else {
             rejectedHost = true
             Darwin.close(fd)
             return nil
