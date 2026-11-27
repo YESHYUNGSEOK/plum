@@ -1,0 +1,21 @@
+Resources/released-code-hashes.txt
+  s_bf0ed424735551::t_37c70768f63648 5
+scripts/bundle.sh
+  s_bf0ed424735551::t_2de92d3c8796d7 49-50
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d132e6aed26c37cd2b397a4c0d13776621203bee",
+  "prompts": {},
+  "sessions": {
+    "s_bf0ed424735551": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5ac29605-eee3-4cf1-9703-b5fa4086d055",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    }
+  }
+}
