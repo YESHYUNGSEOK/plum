@@ -1,0 +1,49 @@
+CONTRIBUTING.md
+  s_bf0ed424735551::t_669764a5967964 56
+README.ko.md
+  s_bf0ed424735551::t_e64e00075fe81c 164
+README.md
+  s_bf0ed424735551::t_5044670346d5ae 111,170
+Resources/released-code-hashes.txt
+  s_bf0ed424735551::t_e097d773338f17 1-4
+Sources/PlumKit/Model/AppModel.swift
+  s_bf0ed424735551::t_fad2a3148648f8 148-152,253-254,285,289-292,584-586,598,607,651,661-670,727-730
+Sources/PlumKit/Model/Updates.swift
+  s_bf0ed424735551::t_4fa1f4e14c1017 63,72,169-172,181
+Sources/PlumKit/Terminal/TerminalHost.swift
+  s_bf0ed424735551::t_b0c792c244330f 9-10,30-38,54-69,114-115,219,269-280,282,644-768,782,784-786,796,812,817-827,829-832,882-891
+Sources/PlumKit/UI/App.swift
+  s_bf0ed424735551::t_4fbdd66600103f 109-110
+Sources/PlumKit/UI/AppActions.swift
+  s_bf0ed424735551::t_b09c7451742274 207-208,212-215
+Tests/PlumKitTests/NavigationTests.swift
+  s_bf0ed424735551::t_dd953952050731 47,52,66,68,70,209,235,267,285,305,331
+Tests/PlumKitTests/TerminalHostTests.swift
+  s_bf0ed424735551::t_16b97c84da7bdc 347-348
+docs/verification.md
+  s_bf0ed424735551::t_77b4e6f9e68101 55-62
+scripts/bundle.sh
+  s_bf0ed424735551::t_fd4bf4c1b74357 21-25,59,63
+scripts/make-release-certificate.sh
+  s_bf0ed424735551::t_7e6a318f3213a1 1-45
+scripts/release.sh
+  s_bf0ed424735551::t_1dfeab1373d979 4-13,35-48,50-52,76-83
+Tests/PlumKitTests/UpdateKeepsTerminalsTests.swift
+  s_bf0ed424735551::t_08911685a658b1 1-95
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "160dab81f2709254f15c199b05f8d87efc89826a",
+  "prompts": {},
+  "sessions": {
+    "s_bf0ed424735551": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5ac29605-eee3-4cf1-9703-b5fa4086d055",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "yeshyungseok <eric.nohhyungseok@gmail.com>"
+    }
+  }
+}
