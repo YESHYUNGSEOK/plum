@@ -1,0 +1,4 @@
+# The cdhash of each Plum release signed with the release certificate, one
+# per line, oldest first: the app attaches to the terminal hosts these
+# started (HostIdentity). release.sh appends each release's line; commit it
+# with the release. Never remove a line while that release may still run.

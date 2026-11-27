@@ -44,13 +44,12 @@ final class NavigationTests: XCTestCase {
         XCTAssertEqual(model.selection, order.last)
     }
 
-    func testUnrestoredTerminalBlocksUpdate() throws {
-        XCTAssertFalse(model.hasTerminalsUpdateCannotRestore)
+    func testTerminalsAlreadyOutOfReachDontHoldAnUpdate() throws {
         var state = model.state
         state.tabs = [SavedTab(id: UUID(), workspace: order[0], title: "running", active: true)]
         try Store(directory: directory).save(state)
 
-        XCTAssertTrue(AppModel(store: Store(directory: directory)).hasTerminalsUpdateCannotRestore)
+        XCTAssertFalse(AppModel(store: Store(directory: directory)).losesTerminals(updatingTo: URL(fileURLWithPath: "/nonexistent")))
     }
 
     func testLocalTerminalBlocksUpdateUntilClosed() throws {
@@ -64,10 +63,11 @@ final class NavigationTests: XCTestCase {
         let local = AppModel(store: Store(directory: directory))
         local.terminalHostExecutable = nil
 
+        let update = URL(fileURLWithPath: "/nonexistent")
         let tab = try XCTUnwrap(local.openTab(in: project.id))
-        XCTAssertTrue(local.hasTerminalsUpdateCannotRestore)
+        XCTAssertTrue(local.losesTerminals(updatingTo: update))
         local.closeTab(tab.id)
-        XCTAssertFalse(local.hasTerminalsUpdateCannotRestore)
+        XCTAssertFalse(local.losesTerminals(updatingTo: update))
     }
 
     func testBackForwardAndLastPlace() {
@@ -206,7 +206,7 @@ final class NavigationTests: XCTestCase {
         }
 
         let model = AppModel(store: store)
-        model.restoreTabs(secureHost: secureClient, legacyHost: legacyClient)
+        model.restoreTabs(host: secureClient, earlier: [legacyClient])
         XCTAssertEqual(Set(model.tabs[project.id, default: []].map(\.id)), Set([legacyID, secureID]))
         XCTAssertEqual(model.tabs[project.id]?.first(where: { $0.id == legacyID })?.customTitle, "legacy")
 
@@ -232,7 +232,7 @@ final class NavigationTests: XCTestCase {
 
         let model = AppModel(store: store)
         model.terminalHostExecutable = "/nonexistent"
-        model.restoreTabs(secureHost: nil, legacyHost: nil)
+        model.restoreTabs(host: nil, earlier: [])
         let fresh = try XCTUnwrap(model.openTab(in: project.id))
 
         XCTAssertTrue(secureClient.list().contains { $0.id == fresh.id })
@@ -264,7 +264,7 @@ final class NavigationTests: XCTestCase {
         defer { unlink(oldPath) }
 
         let model = AppModel(store: store)
-        model.restoreTabs(secureHost: secureClient, legacyHost: nil)
+        model.restoreTabs(host: secureClient, earlier: [])
 
         XCTAssertEqual(try store.load().tabs, [saved, other])
         XCTAssertEqual(try store.load().splits[saved.id.uuidString], split)
@@ -282,10 +282,8 @@ final class NavigationTests: XCTestCase {
         try store.save(state)
 
         let model = AppModel(store: store)
-        XCTAssertTrue(model.hasTerminalsUpdateCannotRestore)
-        model.restoreTabs(secureHost: nil, legacyHost: nil)
+        model.restoreTabs(host: nil, earlier: [])
 
-        XCTAssertFalse(model.hasTerminalsUpdateCannotRestore)
         XCTAssertEqual(try store.load().tabs, [])
     }
 
@@ -304,7 +302,7 @@ final class NavigationTests: XCTestCase {
         defer { oldClient.close(id) }
 
         let model = AppModel(store: store)
-        model.restoreTabs(secureHost: nil, legacyHost: oldClient)
+        model.restoreTabs(host: nil, earlier: [oldClient])
         Thread.sleep(forTimeInterval: 0.3)
 
         XCTAssertTrue(oldClient.list().contains { $0.id == id })
@@ -330,11 +328,10 @@ final class NavigationTests: XCTestCase {
         let legacyClient = try XCTUnwrap(TerminalHostClient(socketPath: legacyPath, executable: "/nonexistent"))
 
         let model = AppModel(store: store)
-        model.restoreTabs(secureHost: secureClient, legacyHost: legacyClient)
+        model.restoreTabs(host: secureClient, earlier: [legacyClient])
 
         // Every running host was asked and none holds it: it has ended.
         XCTAssertEqual(try store.load().tabs, [])
-        XCTAssertFalse(model.hasTerminalsUpdateCannotRestore)
     }
 
     func testSwitcherPutsRecentFirstAndRanksMatches() {

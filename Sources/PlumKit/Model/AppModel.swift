@@ -145,8 +145,11 @@ public final class AppModel {
     /// Keeps terminals running while the app isn't. Nil in tests, and if
     /// it can't be started: tabs then end with the app, as they used to.
     @ObservationIgnored private var host: TerminalHostClient?
-    @ObservationIgnored private var legacyHost: TerminalHostClient?
-    @ObservationIgnored private var legacyTabIDs: Set<UUID> = []
+    /// Hosts of earlier builds, kept for the terminals they hold: new tabs
+    /// open in `host`. Let go once their last tab is gone, so they end.
+    @ObservationIgnored private var earlierHosts: [TerminalHostClient] = []
+    /// The host of each tab that isn't `host`'s.
+    @ObservationIgnored private var owners: [UUID: TerminalHostClient] = [:]
     @ObservationIgnored private var unrestoredTabs: [SavedTab] = []
     @ObservationIgnored var terminalHostExecutable = Bundle.main.executablePath
     private var hasUnrestoredTabs: Bool { !unrestoredTabs.isEmpty }
@@ -247,6 +250,8 @@ public final class AppModel {
 
     /// Starts listening for agent hooks. Call once at launch.
     public func start() {
+        // What this build is, read before an update can replace its files.
+        HostIdentity.prepare()
         writeHookSettings()
         let zsh = store.directory.appendingPathComponent("shell/zsh", isDirectory: true)
         if (try? FileManager.default.createDirectory(at: zsh, withIntermediateDirectories: true)) != nil,
@@ -277,13 +282,14 @@ public final class AppModel {
         } catch {
             errorMessage = String(localized: "에이전트 상태 수신을 시작하지 못했습니다: \(error.localizedDescription)")
         }
-        let secureHost = terminalHostExecutable.flatMap {
+        let ownHost = terminalHostExecutable.flatMap {
             TerminalHostClient(socketPath: TerminalHost.socketPath(for: store), executable: $0)
         }
         // Keep the 11 terminals in this Mac's 11/22 host connected across the update.
-        let oldHost = TerminalHostClient(legacySocketPath: TerminalHost.legacySocketPath(for: store),
-                                         codeHash: "76807cd4262496e4e92b2edd312e6e6a7d3d601f", pid: 23399, pidVersion: 43136)
-        restoreTabs(secureHost: secureHost, legacyHost: oldHost)
+        let pinned = TerminalHostClient(legacySocketPath: TerminalHost.legacySocketPath(for: store),
+                                        codeHash: "76807cd4262496e4e92b2edd312e6e6a7d3d601f", pid: 23399, pidVersion: 43136)
+        let earlier = TerminalHost.earlierHostSockets(for: store).compactMap(TerminalHostClient.init(earlierSocketPath:))
+        restoreTabs(host: ownHost, earlier: [pinned].compactMap { $0 } + earlier)
         if hasUnrestoredTabs, errorMessage == nil {
             errorMessage = String(localized: "기존 터미널에 연결하지 못했습니다. 저장된 탭 정보는 보존했습니다.")
         }
@@ -575,12 +581,9 @@ public final class AppModel {
     /// Attaches to the terminals the host kept while the app was away, in
     /// the order the tabs had, with their titles and which one was open.
     /// A terminal whose workspace is gone is ended.
-    func restoreTabs(secureHost: TerminalHostClient?, legacyHost: TerminalHostClient?) {
-        host = secureHost
-        self.legacyHost = legacyHost
-        let sources: [(TerminalHostClient, Bool)] = [(secureHost, false), (legacyHost, true)].compactMap { pair in
-            pair.0.map { ($0, pair.1) }
-        }
+    func restoreTabs(host: TerminalHostClient?, earlier: [TerminalHostClient]) {
+        self.host = host
+        let sources: [(TerminalHostClient, Bool)] = [host].compactMap { $0 }.map { ($0, false) } + earlier.map { ($0, true) }
         let alive = sources.flatMap { source in source.0.list().map { ($0, source.0, source.1) } }
         let saved = Dictionary(state.tabs.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let rank = Dictionary(state.tabs.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -592,7 +595,7 @@ public final class AppModel {
             let tab = makeTab(terminal, in: workspace.id)
             tab.customTitle = saved[session.id]?.title
             terminal.attach(fd: carried.fd, pid: carried.pid, remote: remote(for: session.id, host: owner))
-            if isLegacy { legacyTabIDs.insert(session.id) }
+            if isLegacy { owners[session.id] = owner }
             tabs[workspace.id, default: []].append(tab)
             // Waiting or done while the app was away: still to be seen to.
             if carried.status != .idle {
@@ -601,6 +604,7 @@ public final class AppModel {
             }
             if saved[session.id]?.active == true || activeTabs[workspace.id] == nil { activeTabs[workspace.id] = session.id }
         }
+        earlierHosts = earlier.filter { candidate in owners.values.contains { $0 === candidate } }
         let restored = Set(tabs.values.joined().map(\.id))
         unrestoredTabs = state.tabs.filter { !restored.contains($0.id) }
         // A terminal lives only in a host. With no host left that couldn't be
@@ -644,7 +648,7 @@ public final class AppModel {
     public func parkTerminals() {
         for tab in tabs.values.joined() where tab.session.isRemote {
             let (screen, received) = tab.session.snapshot()
-            let owner = legacyTabIDs.contains(tab.id) ? legacyHost : host
+            let owner = owners[tab.id] ?? host
             owner?.park(tab.id, snapshot: screen, received: received, status: statuses[tab.id] ?? .idle)
         }
     }
@@ -654,10 +658,16 @@ public final class AppModel {
         tabs.values.joined().filter { !$0.session.isRemote }.count
     }
 
-    var hasTerminalsUpdateCannotRestore: Bool {
-        if !unrestoredTabs.isEmpty { return true }
-        if tabs.values.joined().contains(where: { !legacyTabIDs.contains($0.id) }) { return true }
-        return !(host?.list().isEmpty ?? true)
+    /// Whether installing `app` (a newer release, unpacked but not in place
+    /// yet) would end terminals: those the app runs itself, or those in a
+    /// host the new app couldn't attach to (see `HostIdentity`). Terminals
+    /// that already couldn't be reached at launch aren't counted: an update
+    /// loses nothing more of them.
+    func losesTerminals(updatingTo app: URL) -> Bool {
+        if tabs.values.joined().contains(where: { !$0.session.isRemote }) { return true }
+        // The 11/22 host is pinned in the code itself, which a new build keeps.
+        let hosts = ([host].compactMap { $0 } + earlierHosts).filter { $0.version >= TerminalHost.oldestCompatibleVersion && !$0.list().isEmpty }
+        return !HostIdentity.keepsTerminals(updatingTo: app, hosts: hosts.map { ($0.codeHash ?? "", $0.version) })
     }
 
     public func activateTab(_ id: UUID) {
@@ -714,6 +724,10 @@ public final class AppModel {
         if closedTabs.count > 20 { closedTabs.removeFirst() }
         tab.session.onExit = nil
         tab.session.terminate()
+        // An earlier build's host with nothing left here is let go, so it ends.
+        if let owner = owners.removeValue(forKey: id), !owners.values.contains(where: { $0 === owner }) {
+            earlierHosts.removeAll { $0 === owner }
+        }
         // A pane gives the keyboard to the pane next to it (the one it was
         // split from, usually), not to another tab.
         let order = layout(of: head(of: id)).panes

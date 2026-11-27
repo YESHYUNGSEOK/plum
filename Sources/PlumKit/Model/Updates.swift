@@ -60,7 +60,7 @@ public enum Updates {
     }
 
     public enum InstallError: LocalizedError, Equatable {
-        case noArchive, download, badSignature, notPlum, cannotUnpack, cannotReplace(String)
+        case noArchive, download, badSignature, notPlum, cannotUnpack, wouldEndTerminals, cannotReplace(String)
 
         public var errorDescription: String? {
             switch self {
@@ -69,6 +69,7 @@ public enum Updates {
             case .badSignature: String(localized: "내려받은 파일의 서명이 맞지 않아 설치하지 않았습니다.")
             case .notPlum: String(localized: "내려받은 파일이 이 버전의 Plum이 아닙니다.")
             case .cannotUnpack: String(localized: "내려받은 파일을 풀지 못했습니다.")
+            case .wouldEndTerminals: String(localized: "실행 중인 터미널을 새 버전에서 이어받을 수 없어 업데이트를 보류했습니다. 해당 터미널을 닫은 뒤 다시 설치해 주세요.")
             case let .cannotReplace(reason): String(localized: "앱을 바꾸지 못했습니다: \(reason)")
             }
         }
@@ -165,7 +166,10 @@ public enum Updates {
     }
 
     /// The same, for a zip and signature at hand.
-    public static func install(_ zip: Data, signature: Data, version: String, app: URL = Bundle.main.bundleURL) throws -> URL {
+    /// `keeps` is asked about the new app once it is unpacked, before
+    /// anything is replaced: false stops the install (`wouldEndTerminals`).
+    public static func install(_ zip: Data, signature: Data, version: String, app: URL = Bundle.main.bundleURL,
+                               keeps: (URL) -> Bool = { _ in true }) throws -> URL {
         guard verify(zip, signature: signature, publicKey: publicKey) else { throw InstallError.badSignature }
         guard let bundleID = Bundle.main.bundleIdentifier else { throw InstallError.notPlum }
         // On the app's own volume, so the swap is a rename.
@@ -174,6 +178,7 @@ public enum Updates {
         let file = work.appendingPathComponent("update.zip")
         try zip.write(to: file)
         let fresh = try unpack(file, into: work, version: version, bundleID: bundleID)
+        guard keeps(fresh) else { throw InstallError.wouldEndTerminals }
         return try replace(app, with: fresh)
     }
 
